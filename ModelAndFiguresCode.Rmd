@@ -1,0 +1,3944 @@
+---
+title: "Shrub invasion in forests - Analysis and figures"
+author: "Laís Petri"
+date: '`r format(Sys.time(), "%m/%d/%Y")`'
+output: 
+  html_document:
+    toc: true
+    theme: united 
+    highlight: tango 
+    toc_float: true 
+editor_options: 
+  chunk_output_type: console
+---
+
+**Please, read these notes before running the code:**
+
+1. You will need to download and install OpenBUGS 
+(https://www.mrc-bsu.cam.ac.uk/software/bugs/openbugs/)
+2. The order presented here is defined by each question asked in the main paper. 
+3. Analysis are performed first, then the respective figure.
+4. Analysis and figures presented in the Supplementary material (SM) are placed at the end of this code, after
+the main questions are tackled.
+5. You will need to create the following folders in the working directory: "data", "figures", and "parameters".
+6. Paste the files from this webpage (**figshare**) inside of the "data" folder you just created.
+7. Note: figures included in the main manuscript or SM will not be displayed in the html file after knitting. They will be inside of the folder you created, "figures". The aspect ratio could not be maintained when knitting (probably due to my own coding limitation).
+
+```{r setup, include=FALSE}
+# suppress warnings and messages in case you decide to knit this file
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r packages, include=FALSE}
+# loading the packages
+## linked to many functions
+require(tidyverse)
+require(readxl)
+
+## basic ones necessary for map
+require(sf)
+
+## map of the countries of the entire world and choosing scale, respectively
+require(rnaturalearth)
+require(rnaturalearthdata)
+require(rgeos)
+require(ggspatial)
+require(ggthemes)
+
+## managing data & graphing
+require(ggrepel)
+require(gridExtra)
+require(ggpubr)
+require(ggh4x)
+
+## run models
+require(R2OpenBUGS)
+require(mcmcplots)
+
+## graphs
+require(inlmisc) 
+require(patchwork)
+require(egg) 
+
+# setting common theme
+theme_set(theme_bw()) # classic dark-on-light theme
+```
+
+```{r directory, include=FALSE}
+# Setting up paths to retrieve data files and outputs
+workingdir <- getwd()
+graph.wd <- file.path(workingdir, "figures")
+datain <- file.path(workingdir, "data")
+parametersout <- file.path(workingdir, "parameters")
+```
+
+```{r include=FALSE}
+# Defining colors that will be used later on in the figures
+## mechanisms
+x<-as.data.frame(inlmisc::GetColors(3, scheme = "bright"))
+BRcolor <- x[1,]
+ENcolor <- x[2,]
+PPcolor <- x[3,]
+
+## abiotic factors
+x<-as.data.frame(inlmisc::GetColors(3, scheme = "high-contrast"))
+Lightcolor <- x[1,]
+Nutrientcolor <- x[2,]
+Watercolor <- x[3,]
+
+## number of invaders
+x<-as.data.frame(inlmisc::GetColors(2, scheme = "vibrant"))
+Singlecolor <- x[1,]
+Multicolor <- x[2,]
+
+## type of ES
+x<-as.data.frame(inlmisc::GetColors(2, scheme = "muted"))
+ESNatcolor <- x[1,]
+ESInvcolor <- x[2,]
+```
+
+# **Importing data**
+```{r, echo=FALSE}
+# Importing the data 
+data <- read.csv(file.path(datain, "Data.csv"))
+# Effect size (ES) estimates
+InvEstimate <- read.csv(file.path(datain, "InvEstimateRESULTS.csv"))
+NatBioticEstimate <- read.csv(file.path(datain, "NatBioticEstimateRESULTS.csv"))
+NatAbioticEstimate <- read.csv(file.path(datain, "NatAbioticEstimateRESULTS.csv"))
+```
+Column names are reported in the supplementary material
+```{r importing the estimated data, include=TRUE}
+glimpse(data) # all data
+glimpse(InvEstimate) # Effect size (ES) estimates for invasive species performance with variance
+glimpse(NatBioticEstimate) # Effect size (ES) estimates for native community performance with variance
+glimpse(NatAbioticEstimate) # Effect size (ES) estimates for abiotic conditions with variance
+```
+
+```{r, include=FALSE}
+# Selecting unique observations
+## Invasive ES
+InvUnique <- data %>% select(ObsIDOriginal, InvContmean, InvContsd, InvTreatmean, InvTreatsd) %>% distinct(InvContmean, InvContsd, InvTreatmean, InvTreatsd, .keep_all = T) %>% select(ObsIDOriginal)
+
+## Native community ES
+NatUniqueBiotic <- data %>% filter(NativeCommunity == 1) %>% select(ObsIDOriginal, InvContmean, InvContsd, InvTreatmean, InvTreatsd, NatContmean, NatContsd, NatTreatmean, NatTreatsd) %>% distinct(InvContmean, InvContsd, InvTreatmean, InvTreatsd, NatContmean, NatContsd, NatTreatmean, NatTreatsd, .keep_all = T) %>% select(ObsIDOriginal) 
+
+## Abiotic conditions ES
+NatUniqueAbiotic <- data %>% filter(NativeResponse_CATEGORY == "abiotic", ObsIDOriginal != 1002, ObsIDOriginal != 1121, ObsIDOriginal != 1122) %>% select(ObsIDOriginal, InvContmean, InvContsd, InvTreatmean, InvTreatsd, NatContmean, NatContsd, NatTreatmean, NatTreatsd) %>% distinct(InvContmean, InvContsd, InvTreatmean, InvTreatsd, NatContmean, NatContsd, NatTreatmean, NatTreatsd, .keep_all = T) %>% select(ObsIDOriginal)
+```
+
+# **Q1: What is the most successful mechanism of invasion? What is the most impactful mechanism of invasion?**
+
+## Invasive species performance
+### data preparation
+```{r echo=TRUE}
+# here, I merge the file with the estimated ES values with SD and calculate ES for the observations with no associated variability
+InvAllDataModel <- data %>% filter(ObsIDOriginal %in% InvUnique$ObsIDOriginal) %>% left_join(InvEstimate, by = "ObsIDOriginal") %>% mutate(ESInvmean = ifelse(is.na(ESInvSD), ((InvTreatmean-InvContmean)/((InvTreatmean+InvContmean)/2)), ESInvmean), ObsID = row_number()) %>% group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+```
+
+### analysis
+#### organizing model data
+```{r echo=TRUE}
+J <- nrow(InvAllDataModel) # number of observations
+StudyID <- InvAllDataModel$StudyID # data on study unique number (ID)
+Mechanism <- InvAllDataModel$Mechanism # data on mechanisms
+invESavemean <- InvAllDataModel$ESInvmean # data on ES mean
+invESavesd <- InvAllDataModel$ESInvSD # data on ES variability
+M <- max(InvAllDataModel$ESInvSD, na.rm = T) # maximum value of variability
+K <- length(unique(InvAllDataModel$Mechanism)) # number of unique mechanisms
+R <- K+1 # total number of tau
+W <- length(unique(InvAllDataModel$StudyID)) # number of unique study IDs
+
+# data file to run model
+datamodel <- list (J=J, StudyID=StudyID, Mechanism=Mechanism, 
+                   invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model 
+```{r echo=TRUE}
+modelESInv <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+  for(i in 1:W){
+iSRE[i]~dnorm(0,tau[R])
+}
+
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau", "var")
+
+# running model
+es.simInvDiffStudy <- bugs(datamodel, inits, parameters, model.file = modelESInv, 
+                           n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simInvDiffStudy[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simInvDiffStudy, "beta")
+```
+
++ Model parameters
+```{r parameters 1, echo=FALSE}
+x<-as.data.frame(es.simInvDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-Mech.csv"), row.names = F)
+x
+```
+
++ Model fit:
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simInvDiffStudy[["summary"]]) # retrieves model results
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean)
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation for plots of invasive ES
+samplesize <- InvAllDataModel %>% 
+  group_by(Mechanism) %>%
+  add_tally() %>% ungroup() %>% select(Mechanism, n) %>% distinct() %>%
+  arrange(Mechanism) %>%
+  mutate(comparison2 = paste0("mechanism", 1:3))
+
+         
+inv <- as.data.frame(es.simInvDiffStudy[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(!grepl("^invESavemean.h", rowname),
+         !grepl("^ESIA", rowname),
+         !grepl("^tau", rowname),
+         !grepl("^var",rowname),
+         rowname != "deviance") %>%
+  mutate(type = "invasive")
+
+forestinv <- inv %>%
+  arrange(rowname) %>%
+  mutate(test = str_sub(rowname, 6, 6)) %>% 
+  mutate_all(na_if,"") %>% 
+  mutate(comparison2 = ifelse(is.na(test), "overall", 
+                             ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
+  arrange(comparison2) %>%
+  mutate(index = row_number()) %>%
+  left_join(samplesize) %>%
+  group_by(type) %>%
+  mutate(n1 = ifelse(is.na(n), sum(n, na.rm=TRUE), n),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')'),
+         index=ifelse(Mechanism==1, 3, ifelse(Mechanism==2, 1, 2))) %>%
+  select(-n1, -test) %>%
+  ungroup()
+```
+
+```{r include=FALSE}
+# adjusts the x extreme values
+from <- min(forestinv$`2.5%`, na.rm=TRUE)-0.2
+to <- max(forestinv$`97.5%`, na.rm=TRUE)+0.2
+x1 <- seq(from = from, to = to, 0.01)
+y1 <- dnorm(x1, mean = as.numeric(forestinv[1, "mean"]), sd = as.numeric(forestinv[1,"sd"]))
+datam1 <- x1 %>% 
+  cbind(y1) %>% 
+  as_tibble() %>%
+  rename(x = 1, 
+         y = 2) %>% 
+  mutate(Mechanism = "Propagule pressure")
+x2 <- seq(from = from, to = to, 0.01)
+y2 <- dnorm(x2, mean = as.numeric(forestinv[2, "mean"]), sd = as.numeric(forestinv[2,"sd"]))
+datam2 <- x2 %>% 
+  cbind(y2) %>% 
+  as_tibble() %>%
+  rename(x = 1, 
+         y = 2) %>% 
+  mutate(Mechanism = "Empty niches")
+  
+x3 <- seq(from = from, to = to, 0.01)
+y3 <- dnorm(x3, mean = as.numeric(forestinv[3, "mean"]), sd = as.numeric(forestinv[3,"sd"]))
+datam3inv <- x3 %>% 
+  cbind(y3) %>% 
+  as_tibble() %>%
+  rename(x = 1, 
+         y = 2) %>% 
+  mutate(Mechanism = "Low biotic resistance") %>% 
+  rbind(datam1, datam2) %>% mutate(type="invasive")
+```
+
+## Native community performance
+### data preparation
+```{r echo=TRUE}
+# here, I merge the file with the estimated ES values with SD and calculate ES for the observations with no associated variability
+BioticDataModel <- data %>% filter(ObsIDOriginal %in% NatUniqueBiotic$ObsIDOriginal) %>% 
+  left_join(NatBioticEstimate, by = "ObsIDOriginal") %>% left_join(InvEstimate, by = "ObsIDOriginal") %>% 
+  mutate(ESInvmean = ifelse(is.na(ESInvmean), ((InvTreatmean-InvContmean)/((InvTreatmean+InvContmean)/2)), ESInvmean),
+         ESNatmean = ifelse(is.na(ESNatmean), ((NatTreatmean-NatContmean)/((NatTreatmean+NatContmean)/2)), ESNatmean),
+         ObsID = row_number()) %>% group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+```
+
+### analysis
+#### organizing model data
+```{r}
+J <- nrow(BioticDataModel) # number of observations
+StudyID <- BioticDataModel$StudyID # data on study unique number (ID)
+Mechanism <- BioticDataModel$Mechanism # data on mechanisms
+natESavemean <- BioticDataModel$ESNatmean # data on ES mean
+natESavesd <- BioticDataModel$ESInvSD # data on ES variability
+M <- max(BioticDataModel$ESNatSD, na.rm = T) # maximum value of variability 
+K <- length(unique(BioticDataModel$Mechanism)) # number of unique mechanisms
+R <- K+1 # total number of tau
+W <- length(unique(BioticDataModel$StudyID)) # number of unique study IDs
+
+# data file to run model
+datamodel <- list (J=J, StudyID=StudyID, Mechanism=Mechanism, 
+                   natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESNat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+} # end model
+
+# initials 
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau", "var")
+
+# running model
+es.simNatDiffStudy <- bugs(datamodel, inits, parameters, model.file = modelESNat,
+                           n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simNatDiffStudy[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simNatDiffStudy, "beta")
+```
+
++ Model parameters
+```{r parameters 2, echo=FALSE}
+x<-as.data.frame(es.simNatDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-Mech.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simNatDiffStudy[["summary"]]) 
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x =-1, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation for native community ES
+samplesize <- BioticDataModel %>% 
+  group_by(Mechanism) %>%
+  add_tally() %>% ungroup() %>% select(Mechanism, n) %>% distinct() %>%
+  arrange(Mechanism) %>%
+  mutate(comparison2 = paste0("mechanism", 1:3))
+         
+nat <- as.data.frame(es.simNatDiffStudy[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(!grepl("^natESavemean.h", rowname),
+         !grepl("^ESIA", rowname),
+         !grepl("^tau", rowname),
+         !grepl("^var", rowname),
+         rowname != "deviance") %>%
+  mutate(type = "native")
+forestnat <- nat %>%
+  arrange(rowname) %>%
+  mutate(test = str_sub(rowname, 6, 6)) %>% 
+  mutate_all(na_if,"") %>% 
+  mutate(comparison2 = ifelse(is.na(test), "overall", 
+                             ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
+  arrange(comparison2) %>%
+  mutate(index = row_number()) %>%
+  left_join(samplesize) %>%
+  group_by(type) %>%
+  mutate(n1 = ifelse(is.na(n), sum(n, na.rm=TRUE), n),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')'),
+         index=ifelse(Mechanism==1, 3, ifelse(Mechanism==2, 1, 2))) %>%
+  select(-n1, -test) %>%
+  ungroup() 
+```
+
+```{r include=FALSE}
+# adjust the x extreme values
+from <- min(forestnat$`2.5%`, na.rm=TRUE)-0.2
+to <- max(forestnat$`97.5%`, na.rm=TRUE)+0.2
+x1 <- seq(from = from, to = to, 0.01)
+y1 <- dnorm(x1, mean = as.numeric(forestnat[1, "mean"]), sd = as.numeric(forestnat[1,"sd"]))
+datam1 <- x1 %>% 
+  cbind(y1) %>% 
+  as_tibble() %>%
+  rename(x = 1, 
+         y = 2) %>% 
+  mutate(Mechanism = "Propagule pressure")
+x2 <- seq(from = from, to = to, 0.01)
+y2 <- dnorm(x2, mean = as.numeric(forestnat[2, "mean"]), sd = as.numeric(forestnat[2,"sd"]))
+datam2 <- x2 %>% 
+  cbind(y2) %>% 
+  as_tibble() %>%
+  rename(x = 1, 
+         y = 2) %>% 
+  mutate(Mechanism = "Empty niches")
+  
+x3 <- seq(from = from, to = to, 0.01)
+y3 <- dnorm(x3, mean = as.numeric(forestnat[3, "mean"]), sd = as.numeric(forestnat[3,"sd"]))
+datam3nat <- x3 %>% 
+  cbind(y3) %>% 
+  as_tibble() %>%
+  rename(x = 1, 
+         y = 2) %>% 
+  mutate(Mechanism = "Low biotic resistance") %>% 
+  rbind(datam1, datam2) %>% mutate(type="native")
+```
+
+
+```{r include=FALSE}
+# forest plot
+forestnat2 <- forestnat %>% mutate(treatment=ifelse(Mechanism==3,BRcolor,"white"),shape=23,index=index+0.2)
+forestinv2 <- forestinv %>% arrange(Mechanism) %>% mutate(treatment=c(PPcolor,ENcolor,BRcolor),shape=25)
+
+forest <- forestnat2 %>% rbind(forestinv2) %>% mutate(treatment2=ifelse(Mechanism==1, PPcolor,
+                                                                     ifelse(Mechanism==2,ENcolor,BRcolor)),
+                                                      index=ifelse(Mechanism==1,index-2,
+                                                                   ifelse(Mechanism==2,index+2,index))) %>% arrange(index) 
+ggplot(data=forest, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest, height=.1, size=1,color=forest$treatment2)+
+  geom_point(data=forest, size=4,shape=forest$shape,color=forest$treatment2,fill=forest$treatment,stroke=1)+ #, shape=15
+  scale_y_continuous(name = "", breaks=1:nrow(forest), 
+                     trans="reverse",
+                     labels = c("Propagule pressure","Low biotic resistance", "Empty niches", "","","")) +
+  theme_bw()+
+  coord_cartesian(ylim = c(3.5,0.9), xlim=c(-1.25, 1.25), clip = "off")+
+  xlab("Effect Size (mean+95%PI)")+
+  theme(text=element_text(size=22, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 18),
+      plot.margin = margin(1,1,1,1),#defines margin so the graph does not cut off 
+      axis.line = element_line(colour = "black"),
+      panel.border = element_blank() ) +    #remove top and right panel boundaries
+  geom_text_repel(aes(label = n),direction="both",color=forest$treatment2,size=6,point.size = 6) +
+  annotate("segment", x=-1.2, xend=1.2, y=3.55, yend=3.55, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=-1.15, y=3.45, label="lower", color="black", fontface = "italic", size=5) +
+  annotate("text", x=1.15, y=3.45, label="higher", color="black", fontface = "italic", size=5)+
+  annotate("text", x=0, y=3.45, label="Performance", color="black", fontface = "bold.italic", size=5)+
+   annotate("text", x=-1.25, y=0.82, label="(a)", color="black", fontface = "bold", size=6)+
+  annotate("text", x=-1.25, y=1.02, label="*", color="black", fontface = "bold", size=6)+
+  annotate("text", x=-1.25, y=2.02, label="*", color="black", fontface = "bold", size=6)+
+  annotate("text", x=-1.25, y=3.02, label="*", color="black", fontface = "bold", size=6)
+
+# saves
+ggsave(file.path(graph.wd,"ESNatInv_ForestPlot.png"), plot = last_plot(), width=6.8, height=5.2, dpi = 300, units="in")
+```
+
+```{r echo=FALSE}
+# probability density plots
+datam3 <- datam3nat %>% rbind(datam3inv)
+
+p<- 
+  ggplot(data = datam3, 
+       mapping = aes(x=x, y=y, fill = as.factor(Mechanism), color=as.factor(Mechanism))) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  facet_grid(rows = vars(type),scales="free_y")+
+  geom_line(aes(colour = as.factor(Mechanism), group = as.factor(Mechanism)), size=0.5) +
+  geom_ribbon(aes(x = x, ymax = y, color=as.factor(Mechanism)), ymin=0, alpha=0.3) +
+  scale_color_manual(values=c(ENcolor,BRcolor,PPcolor))+
+    scale_fill_manual(values=c(ENcolor,BRcolor,PPcolor))+
+  theme_bw()+
+  xlab("Effect Size") +
+  ylab("Probability Density Function") +
+  scale_x_continuous(expand = c(0,0)) +
+  theme(text=element_text(size=22, color="black"),
+        legend.position="none",
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size = 18),
+        panel.border = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.margin = margin(1,1,1,1))+#defines margin so the graph does not cut off ) +
+  ggh4x::force_panelsizes(rows = unit(4.5/2, "in"), cols = unit(4, "in"))+
+  annotate("segment", x=-Inf, xend=Inf, y=-Inf, yend=-Inf)
+
+egg::tag_facet(p, 
+          x = -Inf, y = -Inf, 
+          vjust = -12,	
+          hjust = -0.1,
+          size=6,
+          open = "(", close = ")",
+          tag_pool = c("b","c"))
+
+# saves
+ggsave(file.path(graph.wd,"ESNatInv_PDF.png"), plot = last_plot(), width=4.6, height=5.2, dpi = 300, units="in")
+```
+
+# **Q2: what are the abiotic conditions most suitable for invasion success?**
+
+### data preparation
+```{r}
+AbioticDataModel <- data %>% 
+  filter(ObsIDOriginal %in% NatUniqueAbiotic$ObsIDOriginal,) %>% 
+  left_join(NatAbioticEstimate, by = "ObsIDOriginal") %>% left_join(InvEstimate, by = "ObsIDOriginal") %>% 
+  # calculating the ES without SD
+  mutate(ESInvmean = ifelse(is.na(ESInvSD), 
+                            ((InvTreatmean-InvContmean)/((InvTreatmean+InvContmean)/2)), ESInvmean),
+  ESNatmean = ifelse(is.na(ESNatSD), 
+                                   ((NatTreatmean-NatContmean)/((NatTreatmean+NatContmean)/2)), ESNatmean)) %>%
+  # fixing the directionality of the native ES (details on Text S1)
+  mutate(ESNatmean = ifelse(TypeOfTreatment=="canopy_cover"| 
+                              NativeResponse_SUBCATEGORY=="distance_from_river"|
+           NativeResponse_SUBCATEGORY=="depth_soil_mottling"|
+           NativeResponse_SUBCATEGORY=="distance_from_edge"|
+           NativeResponse_SUBCATEGORY=="canopy_height_variability"|
+           NativeResponse_SUBCATEGORY=="light_heterogeneity"|
+           NativeResponse_SUBCATEGORY=="soil_bulk_density", -1*ESNatmean, ESNatmean)) %>% 
+  # aggregating subcategories into fewer categories (details on Text S1)
+  mutate(Abiotic_CATEGORY = ifelse(NativeResponse_SUBCATEGORY=="distance_from_river"|
+                                       NativeResponse_SUBCATEGORY=="soil_moisture"|
+                                       NativeResponse_SUBCATEGORY=="water_depth"|
+                                       NativeResponse_SUBCATEGORY=="water_flow_pick"|
+                                       NativeResponse_SUBCATEGORY=="water_flow_velocity"|
+                                       NativeResponse_SUBCATEGORY=="water_surface_flow_permanence"|
+                                       NativeResponse_SUBCATEGORY=="mean_water_potential"|
+                                       NativeResponse_SUBCATEGORY=="depth_soil_mottling", "water_availability",
+                                     ifelse(NativeResponse_SUBCATEGORY=="canopy_height_variability"|
+                                       NativeResponse_SUBCATEGORY=="distance_from_edge"|
+                                       NativeResponse_SUBCATEGORY=="light_availability"|
+                                       NativeResponse_SUBCATEGORY=="light_heterogeneity", "light_availability",
+                                       ifelse(NativeResponse_SUBCATEGORY=="CO2_concentration"|
+                                       NativeResponse_SUBCATEGORY=="soil_nutrient_availability"|
+                                       NativeResponse_SUBCATEGORY=="soil_pH"|
+                                       NativeResponse_SUBCATEGORY=="standing_litter_biomass"|
+                                       NativeResponse_SUBCATEGORY=="litter_biomass"|
+                                       NativeResponse_SUBCATEGORY=="soil_bulk_density", "nutrient_availability", NA)))) %>% 
+  filter(!is.na(Abiotic_CATEGORY)) %>% 
+  group_by(StudyIDOriginal) %>%
+  mutate(StudyID = cur_group_id()) %>% ungroup() %>% 
+  group_by(Abiotic_CATEGORY) %>% 
+  mutate(AbioticID = cur_group_id()) %>% 
+  ungroup() %>% 
+  mutate(ObsID = row_number())
+```
+
+### analysis
+#### organizing the data
+```{r}
+J <- nrow(AbioticDataModel)
+StudyID <- AbioticDataModel$StudyID
+Category <- AbioticDataModel$AbioticID
+invESavemean <- AbioticDataModel$ESInvmean
+invESavesd <- AbioticDataModel$ESInvSD
+natESavemean <- AbioticDataModel$ESNatmean
+natESavesd <- AbioticDataModel$ESNatSD
+C <- length(unique(AbioticDataModel$AbioticID))
+M <- max(AbioticDataModel$ESInvSD, na.rm = T) 
+N <- max(AbioticDataModel$ESNatSD, na.rm = T) 
+K <- length(unique(AbioticDataModel$AbioticID))
+Q <- K-2
+G <- K-1
+R <- K+1
+H <- nrow(AbioticDataModel[AbioticDataModel$AbioticID == 1,]) # when light availability
+L <- nrow(AbioticDataModel[AbioticDataModel$AbioticID == 2,]) # when nutrient availability
+P <- nrow(AbioticDataModel[AbioticDataModel$AbioticID == 3,]) # when water availability
+O <- length(seq(-2,2,0.1))
+natpred<-seq(-2,2,0.1)
+W <- length(unique(AbioticDataModel$StudyID))
+
+datamodel <- list (J=J, Category=Category, invESavemean=invESavemean, invESavesd=invESavesd, 
+                   natESavemean=natESavemean, natESavesd=natESavesd, C=C, M=M, N=N, K=K, G=G, 
+                   H=H, L=L, O=O, natpred=natpred, W=W, StudyID=StudyID, R=R,Q=Q, G=G, P=P)
+```
+
+#### model
+```{r}
+modelESInvAbioticPred <- function() {
+
+for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+natESavesd[i]~dnorm(N,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+tauN[i]<-1/(natESavesd[i]*natESavesd[i])
+
+invESavemean[i]~dnorm(E[i],tau[Category[i]])
+invESavemean.h[i]~dnorm(E[i],tau[Category[i]]) 
+natES[i]~dnorm(natESavemean[i],tauN[i])
+e[i]~dnorm(0,tauI[i])
+E[i]<-alpha[Category[i]]+beta[Category[i]]*natES[i]+iSRE[StudyID[i]]+e[i]
+}
+
+# priors
+for(i in 1:C){ 
+alpha[i]~dnorm(0,0.0001)
+beta[i]~dnorm(0,0.0001)
+}
+
+for(i in 1:W){
+  iSRE[i]~dnorm(0,tau[R])
+}
+  
+for(i in 1:R){
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+# predictions
+taup[Q]<-H*tau[Q] 
+taup[G]<-L*tau[G] 
+taup[K]<-P*tau[K]
+taup[R]<-W*tau[R]
+
+studyRE~dnorm(0,taup[R])
+
+  for(m in 1:C){ 
+error[m]~dnorm(0,taup[m])
+for(j in 1:O){
+invpred[m,j]<-alpha[m]+beta[m]*natpred[j]+studyRE+error[m]
+  }
+}
+
+}# end model
+
+# parameters
+parameters <- c("alpha", "beta", "invESavemean.h", "invpred", "tau", "var")
+
+# initials 
+inits <- list(
+  list(alpha = c(rep(0, times=K)), beta = c(rep(0, times=K)), var = c(rep(1, times=R))),
+  list(alpha = c(rep(0, times=K)), beta = c(rep(1, times=K)), var = c(rep(1, times=R))),
+  list(alpha = c(rep(0, times=K)), beta = c(rep(-1, times=K)), var = c(rep(1, times=R)))
+)
+
+# running model
+es.simAbioticPred <- bugs(datamodel, inits, parameters, model.file = modelESInvAbioticPred, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value: 
+```{r echo=FALSE}
+es.simAbioticPred[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simAbioticPred, "beta")
+```
+
++ Model parameters
+```{r parameters 3, echo=FALSE}
+x<-as.data.frame(es.simAbioticPred[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname)|
+                                                     grepl("^alpha", rowname))
+write.csv(x, file.path(parametersout, "ESInv~resourceAvailability.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simAbioticPred[["summary"]]) 
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean)
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.5, y = 1, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation for forest plot (slope)
+samplesize <- AbioticDataModel %>% group_by(Abiotic_CATEGORY, AbioticID) %>% tally() %>% 
+   mutate(n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+         
+forest <- as.data.frame(es.simAbioticPred[["summary"]])
+forest <- forest %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  arrange(rowname) %>%
+  mutate(AbioticID = seq(1:3),
+         type = "beta") %>%
+  mutate(index = row_number()) %>%
+  left_join(samplesize) %>% 
+  mutate(index=AbioticID)
+```
+
+```{r include=FALSE}
+# x-axis label
+xname <- "Slope (mean+95%CI)"
+
+#forest plot of slope
+ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
+   geom_errorbarh(data=forest, height=.1, size=1,aes(color=Abiotic_CATEGORY)) +
+  geom_point(data = forest, size=5, color=c(Lightcolor,Nutrientcolor,Watercolor),shape=c(21,24,22),fill="white",stroke=1)+
+ 
+  scale_x_continuous(limits=c(-0.5,0.5), name=xname) +
+scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels = c("Light\navailability","Nutrient\navailability","Water\navailability")) +
+  scale_color_manual(values=c(Lightcolor,Nutrientcolor,Watercolor)) +
+geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
+theme_bw()+
+  labs(y=NULL)+
+  coord_cartesian(ylim = c(3,1), xlim=c(-.5, .5), clip = "off")+
+theme(text=element_text(size=22, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 18, color="black"),
+      plot.margin = margin(1,1,1,10),
+      panel.background = element_rect(fill='transparent', color=NA),
+      plot.background = element_rect(fill='transparent', color=NA),
+      axis.text.y=element_blank(),  #remove y axis labels
+      axis.ticks.y=element_blank(),
+      axis.title.y=element_blank(),
+      axis.text.x = element_text(size=19),
+      axis.line = element_line(colour = "black"),
+      panel.border = element_blank())+ 
+  geom_text_repel(aes(label = n),direction="both",color=c(Lightcolor,Nutrientcolor,Watercolor),size=6, point.size=12,segment.colour = NA)+
+   annotate("text", x=-0.5, y=0.95, label="(b)", color="black", fontface = "bold", size=6)
+
+# saves
+ggsave(file.path(graph.wd,"ESInvAbiotic_PredSlope.png"), plot = last_plot(), width=5, height=6, dpi = 300, units="in")
+```
+
+```{r model1: ESInv~ESNat EN data prep, include=FALSE}
+## data preparation to plot predictions
+ESInvPred<-as.data.frame(es.simAbioticPred[["summary"]])
+ESInvPred <- ESInvPred %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^invpred", rowname)) %>% 
+  mutate(ESNatPred = rep(seq(-2,2,0.1), times = 3),
+         AbioticID = rep(1:3, times=1, each =41)) %>% 
+  left_join(select(AbioticDataModel, c(Abiotic_CATEGORY, AbioticID)), by = "AbioticID") %>%
+  distinct() %>% 
+  rename(ESInvPred = mean,
+         CI25 = `2.5%`,
+         CI975 = `97.5%`)
+```
+
+```{r model1: ESInv~ESNat EN plot, include=FALSE}
+# plotting real data in the background and the prediction lines on top
+  ggplot(ESInvPred, aes(ESNatPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
+  geom_point(data = AbioticDataModel, aes(ESNatmean, ESInvmean, 
+                                     color = as.factor(Abiotic_CATEGORY),
+                                     group = as.factor(Abiotic_CATEGORY),
+                                     shape = as.factor(Abiotic_CATEGORY)),size=3,alpha=0.8) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-0.2, 2.1), 
+                  xlim=c(-2,2), 
+                  clip = "off")+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
+  scale_color_manual(values=c(Lightcolor,Nutrientcolor,Watercolor),
+                     labels=c("Light","Soil nutrient","Soil water")) +
+  scale_fill_manual(values=c(Lightcolor,Nutrientcolor,Watercolor), 
+                    labels=c("Light","Soil nutrient","Soil water")) +
+  scale_shape_manual(values=c(16,17,15),labels=c("Light","Soil nutrient","Soil water")) +
+  xlab("Abiotic Effect Size") +
+  ylab("Invasive Effect Size (mean+95%PI)\n\n") +
+  theme(text=element_text(size=20, color="black"),
+        legend.position="bottom",
+        legend.margin=margin(t=-10), # removes space between graph and legend
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        legend.text = element_text(size = 17),
+        legend.key.size = unit(0.4, "cm"),
+      plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
+      axis.line = element_line(colour = "black"),
+      axis.text.y = element_text(size=19),
+      axis.text.x = element_text(size=19),
+      panel.border = element_blank())+
+  annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=-1.8, y=-0.15, label="lower", color="black", fontface = "italic",size=6) +
+  annotate("text", x=1.8, y=-0.15, label="higher", color="black", fontface = "italic",size=6)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=6) +
+  annotate("segment", y=0.05, yend=1.95, x=-2.35, xend=-2.35, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0.05, x=-2.52, label="lower", color="black", fontface = "italic",angle=90, size=6) +
+  annotate("text", y=1.95, x=-2.52, label="higher", color="black", fontface = "italic", angle=90, size=6)+
+  annotate("text", y=1, x=-2.52, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=6)+
+   annotate("text", x=-1.87, y=2.15, label="(a)", color="black", fontface = "bold", size=6)
+
+# saves
+ggsave(file.path(graph.wd,"ESInvAbiotic_Pred.png"), plot = last_plot(), width=8, height=6, dpi = 300, units="in")
+```
+
+# **Q3: Through which mechanism of invasion, the native community is most vulnerable?**
+### data preparation
+```{r echo=TRUE}
+BioticDataModel <- data %>% filter(ObsIDOriginal %in% NatUniqueBiotic$ObsIDOriginal) %>% 
+  left_join(NatBioticEstimate, by = "ObsIDOriginal") %>% left_join(InvEstimate, by = "ObsIDOriginal") %>% 
+  mutate(ESInvmean = ifelse(is.na(ESInvmean), ((InvTreatmean-InvContmean)/((InvTreatmean+InvContmean)/2)), ESInvmean),
+         ESNatmean = ifelse(is.na(ESNatmean), ((NatTreatmean-NatContmean)/((NatTreatmean+NatContmean)/2)), ESNatmean),
+         ObsID = row_number()) %>% group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+```
+
+### organizing model data
+```{r}
+# observations per mechanism
+obs <- BioticDataModel %>% count(Mechanism)
+
+J <- nrow(BioticDataModel)
+StudyID <- BioticDataModel$StudyID
+Mechanism <- BioticDataModel$Mechanism
+invESavemean <- BioticDataModel$ESInvmean
+invESavesd <- BioticDataModel$ESInvSD
+natESavemean <- BioticDataModel$ESNatmean
+natESavesd <- BioticDataModel$ESNatSD
+W <- length(unique(BioticDataModel$StudyID))
+M <- max(BioticDataModel$ESInvSD, na.rm = T)
+N <- max(BioticDataModel$ESNatSD, na.rm = T)
+invpred<-seq(0,2,0.1)
+K <- length(unique(BioticDataModel$Mechanism))
+R <- K+1
+U <- as.numeric(obs[1,2]) #mechanism1
+V <- as.numeric(obs[2,2]) #mechanism2
+X <- as.numeric(obs[3,2]) #mechanism3
+O <- length(seq(0,2,0.1))
+
+
+datamodel <- list (J = J, StudyID = StudyID, Mechanism = Mechanism, invESavemean = invESavemean, invESavesd = invESavesd, natESavemean = natESavemean, natESavesd = natESavesd, W=W, invpred = invpred, M=M, N=N, K=K, R=R, U=U, V=V, X=X, O=O)
+```
+
+### model
+```{r}
+modelBiotic1 <- function() {
+
+for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+natESavesd[i]~dnorm(N,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+tauN[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(E[i],tau[Mechanism[i]])
+natESavemean.h[i]~dnorm(E[i],tau[Mechanism[i]]) 
+invES[i]~dnorm(invESavemean[i],tauI[i])
+e[i]~dnorm(0,tauN[i])
+E[i]<-beta[Mechanism[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
+
+}
+
+# priors
+for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+}
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+
+for(i in 1:R){
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+# predictions
+  
+taup[1]<-U*tau[1] #mechanism1
+taup[2]<-V*tau[2] #mechanism2
+taup[3]<-X*tau[3] #mechanism3
+taup[4]<-W*tau[4] #SRE
+
+studyRE~dnorm(0,taup[R])
+
+  for(m in 1:K){
+error[m]~dnorm(0,taup[m])
+study[m]~dnorm(0,taup[m])
+for(j in 1:O){
+natpred[m,j]<-beta[m]*invpred[j]+studyRE+error[m]
+  }
+}
+
+
+}# end model
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var")
+
+# initials
+inits <- list(
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times=R))),
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times=R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times=R)))
+)
+
+# running model
+es.simBiotic <- bugs(datamodel, inits, parameters, model.file = modelBiotic1, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simBiotic[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simBiotic, "beta")
+```
+
++ Model parameters
+```{r parameters 4, echo=FALSE}
+x<-as.data.frame(es.simBiotic[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-impactMech.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simBiotic[["summary"]]) 
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = -1.7, y = 0, labels = mylabel)
+```
+
+```{r include=FALSE}
+# organizing data for forest plot (slopes, inset)
+samplesize <- BioticDataModel %>% group_by(Mechanism) %>% add_tally() %>% ungroup() %>% select(Mechanism, n) %>% distinct() %>%
+  arrange(Mechanism) %>% mutate(n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+         
+forest <- as.data.frame(es.simBiotic[["summary"]])
+forest <- forest %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname),!grepl("^var", rowname)) %>%
+  arrange(rowname) %>%
+  mutate(Mechanism = seq(1:3),
+         type = "beta") %>%
+  mutate(index = row_number()) %>%
+  left_join(samplesize) %>% 
+  mutate(Mechanismdummy = ifelse(index==1, "Propagule pressure", ifelse(index==2, "Empty niches", "Low biotic resistance")),
+  index=ifelse(Mechanism==1, 3, ifelse(Mechanism==2, 1, 2)),
+  shape=ifelse(Mechanism==1, 22, ifelse(Mechanism==2, 21, 24)),
+  treatment2=ifelse(Mechanism==1, PPcolor, ifelse(Mechanism==2, ENcolor, BRcolor)),
+  treatment=ifelse(Mechanism==3, BRcolor, "white"))
+```
+
+```{r include=FALSE}
+# forest plot (slopes, inset)
+
+# x-axis label
+xname <- "Slope (mean+95%CI)"
+
+inset_plot <-
+  ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
+  geom_errorbarh(data=forest, height=.1, size=1,color=forest$treatment2) +
+  geom_point(data = forest, size=4, shape=forest$shape, color=forest$treatment2,fill=forest$treatment,stroke=1)+
+    scale_x_continuous(limits=c(-0.8,0.15), name=xname, breaks = c(-0.8, -0.4, 0)) +
+  scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels=NULL) +
+  geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
+  theme_bw()+
+  coord_cartesian(ylim=c(3.1,0.9),clip = "off")+
+  theme(panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.text.x=element_text(size = 13),
+      axis.title = element_text(size = 13, color="black"),
+      panel.background = element_rect(fill='transparent', color=NA),
+      plot.background = element_rect(fill='transparent', color=NA),
+      axis.ticks.y=element_blank(),
+      axis.title.y=element_blank())+ 
+  annotate("text", x=-0.45, y=2.5, label="(15)", color=PPcolor, size=5)+
+  annotate("text", x=-0.45, y=1.5, label="(52)", color=BRcolor, size=5)+
+  annotate("text", x=-0.09, y=1.4, label="(36)", color=ENcolor, size=5)
+``` 
+
+
+```{r include=FALSE}
+# data prep for: ESNat~ESInv with predictions by mechanism + inset
+
+## Real data (calculated values)
+BioticDataModel<- BioticDataModel %>% 
+   mutate(Mechanismdummy = ifelse(Mechanism ==1, "Propagule pressure", ifelse(Mechanism==2, "Empty niches", "Low biotic resistance")),
+  shape=ifelse(Mechanism==1, 19, ifelse(Mechanism==2, 17, 15)))
+## predictions
+ESNatPred<-as.data.frame(es.simBiotic[["summary"]])
+ESNatPred <- ESNatPred %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natpred", rowname)) %>% 
+  mutate(ESInvPred = rep(seq(0,2,0.1), times = 3),
+         Mechanism = rep(1:3, times=1, each =21),
+         Mechanismdummy = ifelse(Mechanism ==1, "Propagule pressure",
+                              ifelse(Mechanism==2, "Empty niches", "Low biotic resistance"))) %>% 
+  rename(ESNatPred = mean,
+         CI25 = `2.5%`,
+         CI975 = `97.5%`)
+```
+
+```{r model1: ESNat~ESInv plot, include=FALSE}
+## ESNat~ESInv with predictions by mechanism + inset
+main_plot <-
+  ggplot(ESNatPred, aes(ESInvPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_point(data = BioticDataModel, aes(invESavemean, natESavemean,
+                                     color = as.factor(Mechanismdummy),
+                                     group = as.factor(Mechanismdummy),
+                                     shape=as.factor(Mechanismdummy)),size=3,alpha=0.8) +
+  geom_line(aes(y=ESNatPred, colour = as.factor(Mechanismdummy), group = as.factor(Mechanismdummy)), size=1.5) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-2.1, 2), xlim=c(0,2), clip = "off")+
+  scale_color_manual(values=c(ENcolor,BRcolor,PPcolor))+
+    scale_fill_manual(values=c(ENcolor,BRcolor,PPcolor))+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Mechanismdummy), fill = as.factor(Mechanismdummy)), alpha=0.2) +
+  xlab("Invasive Effect Size") +
+  ylab("Impact on native community\n\n ") +
+  guides(color = guide_legend(nrow = 1))+
+  theme(legend.position=c(0.4,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        legend.text = element_text(size = 15),
+        legend.key.size = unit(0.4, "cm"),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+      axis.text.x = element_text(size=19),
+        axis.line = element_line(colour = "black"),
+      panel.border = element_blank(),
+      plot.margin = margin(1,10,18,1))+  #defines margin so the graph does not cut off) 
+  annotate("segment", x=0.1, xend=1.9, y=-2.16, yend=-2.16, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=0.2, y=-1.95, label="lower", color="black", fontface = "italic", size=6) +
+  annotate("text", x=1.8, y=-1.95, label="higher", color="black", fontface = "italic", size=6)+
+  annotate("text", x=1, y=-1.95, label="Performance", color="black", fontface = "bold.italic", size=6) +
+  annotate("segment", y=2, yend=-1.9, x=-0.15, xend=-0.15, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=-1.9, x=-0.23, label="higher", color="black", fontface = "italic",angle=90, size=6) +
+  annotate("text", y=1.9, x=-0.23, label="lower", color="black", fontface = "italic", angle=90, size=6)+
+  annotate("text", y=0, x=-0.23, label="Impact", color="black", fontface = "bold.italic", angle=90, size=6)+
+   annotate("text", x=0.08, y=2.14, label="(a)", color="black", fontface = "bold", size=6)+
+  annotate("text", y=0, x=-0.325, label="Effect Size (mean+95%PI)", color="black", angle=90,size=6)
+
+# adds the inset graph
+main_plot +
+patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') # overlaps graph to create inset
+
+# saves
+ggsave(file.path(graph.wd,"ESNatInv_Predictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
+```
+
+# **Q4: Is the native community more impacted by one of multiple invaders?**
+### organizing model data
+```{r}
+#observations per mechanism
+BioticDataModel <- BioticDataModel %>% mutate(MultipleInvader=ifelse(MultipleInvader==0, 2, 1))
+
+obs <- BioticDataModel %>% count(MultipleInvader)
+
+J <- nrow(BioticDataModel)
+StudyID <- BioticDataModel$StudyID
+Category <- BioticDataModel$MultipleInvader
+invESavemean <- BioticDataModel$ESInvmean
+invESavesd <- BioticDataModel$ESInvSD
+natESavemean <- BioticDataModel$ESNatmean
+natESavesd <- BioticDataModel$ESNatSD
+W <- length(unique(BioticDataModel$StudyID))
+M <- max(BioticDataModel$ESInvSD, na.rm = T)
+N <- max(BioticDataModel$ESNatSD, na.rm = T)
+invpred<-seq(0,2,0.1)
+K <- length(unique(BioticDataModel$MultipleInvader))
+R <- K+1
+U <- as.numeric(obs[1,2]) #multiple invader
+V <- as.numeric(obs[2,2]) #single invader
+O <- length(seq(0,2,0.1))
+
+datamodel <- list (J = J, StudyID = StudyID, Category = Category, invESavemean = invESavemean, invESavesd = invESavesd, natESavemean = natESavemean, natESavesd = natESavesd, W=W, invpred = invpred, M=M, N=N, K=K, R=R, U=U, V=V, O=O)
+```
+
+### model
+```{r}
+modelBiotic2 <- function() {
+
+for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+natESavesd[i]~dnorm(N,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+tauN[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(E[i],tau[Category[i]])
+natESavemean.h[i]~dnorm(E[i],tau[Category[i]]) #predicted
+invES[i]~dnorm(invESavemean[i],tauI[i])
+e[i]~dnorm(0,tauN[i])
+E[i]<-beta[Category[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
+
+}
+
+# priors
+for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+}
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+
+for(i in 1:R){
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+# predictions
+  
+taup[1]<-U*tau[1] #multiple invader
+taup[2]<-V*tau[2] #single invader
+taup[3]<-W*tau[3] #SRE
+
+studyRE~dnorm(0,taup[R])
+
+  for(m in 1:K){
+error[m]~dnorm(0,taup[m])
+study[m]~dnorm(0,taup[m])
+for(j in 1:O){
+natpred[m,j]<-beta[m]*invpred[j]+studyRE+error[m]
+  }
+}
+
+
+}# end model
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var")
+
+# initials
+inits <- list(
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times=R))),
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times=R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times=R)))
+)
+
+# running model
+es.simBiotic2 <- bugs(datamodel, inits, parameters, model.file = modelBiotic2, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simBiotic2[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simBiotic2, "beta")
+```
+
++ Model parameters
+```{r parameters 5, echo=FALSE}
+x<-as.data.frame(es.simBiotic2[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat~impactMultInv.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simBiotic2[["summary"]])
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = -1.7, y = 0, labels = mylabel)
+```
+
+```{r include=FALSE}
+# organizing data for forest plot (slopes, inset)
+samplesize <- BioticDataModel %>% group_by(MultipleInvader) %>% add_tally() %>% ungroup() %>% select(MultipleInvader, n) %>% distinct() %>%
+  arrange(MultipleInvader) %>% mutate(comparison2 = paste0("multipleinvader", 1:0), 
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+
+forest <- as.data.frame(es.simBiotic2[["summary"]])
+forest <- forest %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname), !grepl("^var", rowname)) %>%
+  arrange(rowname) %>%
+  mutate(comparison2 = paste0("multipleinvader", 1:0),
+         type = "beta") %>%
+  mutate(index = row_number()) %>%
+  left_join(samplesize) %>% 
+  mutate(MultInvdummy = ifelse(index==1, "Multiple invaders", "Single invader"),
+  index=ifelse(comparison2=="multipleinvader1", 2, 1))
+```
+
+```{r model1: Slope, include=FALSE}
+# forest plot (slopes, inset)
+
+xname <- "Slope (mean+95%CI)"
+inset_plot <-
+  ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
+  geom_errorbarh(data=forest, height=.1, size=1,color=c(Multicolor,Singlecolor)) +
+  geom_point(data = forest, size=4, shape=c(24,21), stroke=1,color=c(Multicolor,Singlecolor),fill=c("white",Singlecolor))+
+    scale_x_continuous(limits=c(-0.6,.5), name=xname) +
+scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels = c("Single invader", "Multiple Invader")) +
+geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
+theme_bw()+
+theme(panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title = element_text(size = 13, color="black"),
+      axis.text.x=element_text(size = 13),
+      panel.background = element_rect(fill='transparent', color=NA),
+      plot.background = element_rect(fill='transparent', color=NA),
+      axis.text.y=element_blank(),  #remove y axis labels
+      axis.ticks.y=element_blank(),
+      axis.title.y=element_blank())+ 
+  annotate("text", x=-0.4, y=1.2, label="(77)", color=Singlecolor, size=5)+
+   annotate("text", x=0.2, y=1.75, label="(26)", color=Multicolor, size=5)
+``` 
+
+```{r include=FALSE}
+# data prep for ESNat~ESInv with predictions by number of invaders + inset
+## Real data (calculated values)
+BioticDataModel<- BioticDataModel %>% 
+   mutate(MultInvdummy = ifelse(MultipleInvader==1, "Multiple invaders", "Single invader"))
+
+range(BioticDataModel$ESInvmean)
+range(BioticDataModel$ESNatmean)
+
+## predictions
+ESNatPred<-as.data.frame(es.simBiotic2[["summary"]])
+ESNatPred <- ESNatPred %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natpred", rowname)) %>% 
+  mutate(ESInvPred = rep(seq(0,2,0.1), times = 2),
+         MultipleInvader = rep(1:0, times=1, each =21),
+         MultInvdummy = ifelse(MultipleInvader==1, "Multiple invaders", "Single invader")) %>% 
+  rename(ESNatPred = mean,
+         CI25 = `2.5%`,
+         CI975 = `97.5%`)
+```
+
+```{r echo=FALSE}
+# ESNat~ESInv with predictions by number of invaders + inset
+
+main_plot <-
+  ggplot(ESNatPred, aes(ESInvPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_point(data = BioticDataModel, aes(invESavemean, natESavemean,
+                                     color = as.factor(MultInvdummy),
+                                     group = as.factor(MultInvdummy),
+                                     shape = as.factor(MultInvdummy)),size=3,alpha=0.8) +
+  geom_line(aes(y=ESNatPred, colour = as.factor(MultInvdummy), group = as.factor(MultInvdummy)), size=1.5) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-2.1, 2), xlim=c(0,2), clip = "off")+
+  scale_color_manual(values=c(Multicolor,Singlecolor))+
+    scale_fill_manual(values=c(Multicolor,Singlecolor))+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(MultInvdummy), fill = as.factor(MultInvdummy)), alpha=0.2) +
+  xlab("Invasive Effect Size") +
+  ylab("\n\n") +
+  guides(color = guide_legend(nrow = 1))+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        legend.text = element_text(size = 15),
+        legend.key.size = unit(0.4, "cm"),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=19),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))+  #defines margin so the graph does not cut off) 
+  annotate("segment", x=0.1, xend=1.9, y=-2.16, yend=-2.16, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=0.2, y=-2, label="lower", color="black", fontface = "italic", size=6) +
+  annotate("text", x=1.8, y=-2, label="higher", color="black", fontface = "italic", size=6)+
+  annotate("text", x=1, y=-2, label="Performance", color="black", fontface = "bold.italic", size=6) +
+   annotate("text", x=0.08, y=2.15, label="(b)", color="black", fontface = "bold", size=6)#+
+
+# adding the inset graph
+main_plot +
+patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') # overlaps graph to create inset
+
+ggsave(file.path(graph.wd,"ESNatInv_MultInvPredictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
+```
+
+# **SM: Invasive species and native community Performance per variables**
+## Ecoregions
+### Invasive performance
+#### organizing model data
+```{r}
+InvAllDataModel2 <- InvAllDataModel %>% filter(!is.na(OlsonEtAl2001_GlobalEcoregions))%>% 
+  group_by(OlsonEtAl2001_GlobalEcoregions) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID
+CategoryID <- InvAllDataModel2$CategoryID
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau", "var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 8, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-Ecoregions.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# organizing data to plot it later together with native community ES
+samplesize <- InvAllDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, OlsonEtAl2001_GlobalEcoregions, n) %>% distinct() 
+
+         
+inv <- as.data.frame(es.simCat[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "invasive")
+
+forest2inv <- inv %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+  
+```
+
+### Native performance
+#### organizing model data
+```{r}
+BioticDataModel2 <- BioticDataModel %>% filter(!is.na(OlsonEtAl2001_GlobalEcoregions))%>% 
+  group_by(OlsonEtAl2001_GlobalEcoregions) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(BioticDataModel2)
+StudyID <- BioticDataModel2$StudyID
+CategoryID <- BioticDataModel2$CategoryID
+natESavemean <- BioticDataModel2$ESNatmean
+natESavesd <- BioticDataModel2$ESNatSD
+M <- max(BioticDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(BioticDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(BioticDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials 
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau", "var")
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 14, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-Ecoregions.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]])
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- BioticDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, OlsonEtAl2001_GlobalEcoregions, n) %>% distinct() 
+         
+nat <- as.data.frame(es.simCat[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "native")
+
+forest2nat <- nat %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+  
+```
+
+```{r include=FALSE}
+# forest plot of ecoregions, with invasive species and native community ES
+forest2nat <- forest2nat %>% mutate(index=ifelse(CategoryID==1, 2.2,
+                                       ifelse(CategoryID==2, 5.2,
+                                       ifelse(CategoryID>2, index+3.2, index))),
+                                 treatment=ifelse(CategoryID==3, "a", "b"),
+                                 treatment2=ESNatcolor,shape=23)
+
+forest2 <-  forest2inv %>%  mutate(treatment=ifelse(CategoryID==1|CategoryID==3|CategoryID==5|
+                                                        CategoryID==9, "d", "c"), 
+                                   treatment2=ESInvcolor,shape=21) %>% rbind(forest2nat)
+
+ecoreglabels <- c("Boreal Forests/Taiga", "Deserts and Xeric\nShrublands", "Flooded Grasslands\nand Savannas", "Mediterranean Forests,\nWoodlands and Scrub", "Montane Grasslands\nand Shrublands","Temperate Broadleaf\nand Mixed Forests","Temperate Conifer\nForests","Temperate Grasslands,\nSavannas and Shrublands", "Tropical and Subtropical\nDry Broadleaf Forests", "Tropical and Subtropical\nGrasslands, Savannas\nand Shrublands", "Tropical and Subtropical\nMoist Broadleaf Forests","","","","","","")
+
+p2<-
+  ggplot(data=forest2, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest2, height=.1, size=1, color=forest2$treatment2)+
+  geom_point(data=forest2, size=4, shape=forest2$shape, color=forest2$treatment2, aes(fill=treatment), stroke=1)+
+  scale_y_continuous(name = "", breaks=1:nrow(forest2),trans="reverse",labels = ecoreglabels) +
+  scale_fill_manual(values = c(ESNatcolor, 'white', ESInvcolor,'white'))+
+  xlab("Effect size (ES, mean + 95%PI)") + # I might not need this when stacking them all
+  coord_cartesian(ylim = c(11,1), xlim=c(-5.5,4.7), clip = "off")+
+  theme_bw()+ 
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.text.y = element_text(size=9),
+      axis.title.x = element_blank(),
+      plot.margin = margin(1,10,1,1),
+      axis.line=element_line(color="black"),
+      panel.border = element_blank()) + 
+  geom_text_repel(aes(label = n), size=3, color=forest2$treatment2) +
+  annotate("text", x=-5.5, y=0.63, label="(b)", color="black", fontface = "bold", size=4)+
+  ggh4x::force_panelsizes(cols = unit(3, "in"), rows = unit(4, "in"))
+```
+
+## Forest community
+### Invasive performance
+#### organizing model data
+```{r}
+InvAllDataModel2 <- InvAllDataModel %>% filter(!is.na(ForestCommunity),
+                                               ForestCommunity!="not_reported")%>% 
+  mutate(ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity)) %>% 
+  group_by(ForestCommunity) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID
+CategoryID <- InvAllDataModel2$CategoryID
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials 
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau", "var")
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 9, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-ForestComm.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- InvAllDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, ForestCommunity, n) %>% distinct() 
+
+         
+inv <- as.data.frame(es.simCat[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "invasive")
+
+forest3inv <- inv %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+### Native performance
+#### organizing model data
+```{r}
+BioticDataModel2 <- BioticDataModel %>% filter(!is.na(ForestCommunity),
+                                               ForestCommunity!="not_reported")%>% 
+  mutate(ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity)) %>% 
+  group_by(ForestCommunity) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(BioticDataModel2)
+StudyID <- BioticDataModel2$StudyID
+CategoryID <- BioticDataModel2$CategoryID
+natESavemean <- BioticDataModel2$ESNatmean
+natESavesd <- BioticDataModel2$ESNatSD
+M <- max(BioticDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(BioticDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(BioticDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau", "var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 15, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-ForestComm.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]])
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- BioticDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, ForestCommunity, n) %>% distinct() 
+
+         
+nat <- as.data.frame(es.simCat[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "native")
+
+forest3nat <- nat %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+  
+```
+
+```{r echo=FALSE}
+# forest plot of forest community, with invasive species and native community ES
+forest3nat <- forest3nat %>% mutate(index=ifelse(index<4, index+0.2,
+                                       ifelse(index>3&index<12, index+1.2, 
+                                              ifelse(ForestCommunity=="woodland", 14.2, index))),
+                                 treatment=ifelse(CategoryID==5, "a", "b"),
+                                 treatment2=ESNatcolor,shape=23)
+
+forest3 <- forest3inv %>% mutate(treatment=ifelse(CategoryID==2|
+                                                    CategoryID==4|
+                                                    CategoryID==9|
+                                                    CategoryID==13, "d", "c"), 
+                                   treatment2=ESInvcolor,shape=21) %>% rbind(forest3nat)
+
+forestlabels <-  c("Broadleaf", "Conifer", "Deciduous", "Deciduous floodplain", "Dry", "Evergreen", "Floodplain","Mixed","Riparian","Savanna","Semi-deciduous","Semi-dry", "Shrubland","Woodland","","","","","","","","","","","")
+
+p3<-
+  ggplot(data=forest3, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest3, height=.1, size=1, color=forest3$treatment2)+
+  geom_point(data=forest3, size=4, shape=forest3$shape, color=forest3$treatment2, aes(fill=treatment), stroke=1)+
+  scale_y_continuous(name = "", breaks=1:nrow(forest3),trans="reverse",labels = forestlabels) +
+  scale_fill_manual(values = c(ESNatcolor, 'white', ESInvcolor,'white'))+
+  xlab("Effect size (ES, mean + 95%PI)") + # I might not need this when stacking them all
+  coord_cartesian(ylim = c(14.3,0.9), xlim=c(-6.5,5), clip = "off")+
+  theme_bw()+
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      plot.margin = margin(1,1,1,1),
+      axis.line=element_line(color="black"),
+      panel.border = element_blank()) + 
+  geom_text_repel(aes(label = n), size=3, color=forest3$treatment2) +
+  annotate("text", x=-6.5, y=0.45, label="(c)", color="black", fontface = "bold", size=4)+
+  ggh4x::force_panelsizes(rows = unit(4, "in"), cols = unit(3, "in"))
+```
+
+## Forest type
+### Invasive performance
+#### organizing model data
+```{r}
+InvAllDataModel2 <- InvAllDataModel %>% filter(!is.na(TypeOfForest),
+                                               TypeOfForest!="not_reported") %>% 
+  group_by(TypeOfForest) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID
+CategoryID <- InvAllDataModel2$CategoryID
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau","var")
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value: 
+```{r}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 10, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-ForestType.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- InvAllDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, TypeOfForest, n) %>% distinct() 
+
+         
+inv <- as.data.frame(es.simCat[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "invasive")
+
+forest4inv <- inv %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+### Native performance
+#### organizing model data
+```{r}
+BioticDataModel2 <- BioticDataModel %>% filter(!is.na(TypeOfForest),
+                                               TypeOfForest!="not_reported") %>% 
+  group_by(TypeOfForest) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(BioticDataModel2)
+StudyID <- BioticDataModel2$StudyID
+CategoryID <- BioticDataModel2$CategoryID
+natESavemean <- BioticDataModel2$ESNatmean
+natESavesd <- BioticDataModel2$ESNatSD
+M <- max(BioticDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(BioticDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(BioticDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau","var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 16, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-ForestType.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- BioticDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, TypeOfForest, n) %>% distinct() 
+
+         
+nat <- as.data.frame(es.simCat[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "native")
+
+forest4nat <- nat %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+```{r echo=FALSE}
+forest4nat <- forest4nat %>% mutate(index=ifelse(TypeOfForest=="natural", 1.2,
+                                       ifelse(TypeOfForest=="natural_secondary", 3.2,
+                                       ifelse(TypeOfForest=="natural_secondary_invaded_canopy", 4.2,
+                                       ifelse(TypeOfForest=="plantation", 5.2,
+                                       ifelse(TypeOfForest=="restoration_planted", 7.2, index))))),
+                                 treatment=ifelse(CategoryID==4, "a", "b"),
+                                 treatment2=ESNatcolor,shape=23)
+
+forest4 <- forest4inv %>% 
+  mutate(treatment=ifelse(CategoryID>3, "d", "c"), 
+                                   treatment2=ESInvcolor,shape=21) %>% 
+  rbind(forest4nat)
+
+forestlabels <-  c("Natural", "Natural primary", "Natural secondary", "Natural secondary\nwith invaded canopy", "Plantation", "Plantation and natural", "Restoration (planted)","","","","","")
+
+
+p4<-
+  ggplot(data=forest4, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest4, height=.1, size=1, color=forest4$treatment2)+
+  geom_point(data=forest4, size=4, shape=forest4$shape, color=forest4$treatment2, aes(fill=treatment), stroke=1)+
+  scale_y_continuous(name = "", breaks=1:nrow(forest4),trans="reverse",labels = forestlabels) +
+  scale_fill_manual(values = c(ESNatcolor, 'white', ESInvcolor,'white'))+
+  xlab("Effect size (ES, mean + 95%PI)") + 
+  coord_cartesian(ylim = c(7.3,0.9), xlim=c(-6.3,6.5), clip = "off")+
+  theme_bw()+ 
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      plot.margin = margin(1,1,1,1),
+      axis.line=element_line(color="black"),
+      panel.border = element_blank()) +
+  geom_text_repel(aes(label = n), size=3, color=forest4$treatment2) +
+  annotate("text", x=-6.4, y=0.7, label="(d)", color="black", fontface = "bold", size=4)+
+  ggh4x::force_panelsizes(cols = unit(3, "in"), rows = unit(4, "in"))
+```
+
+## Study type
+### Invasive performance
+#### organizing model data
+```{r}
+InvAllDataModel2 <- InvAllDataModel %>% 
+  group_by(TypeOfStudy) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID
+CategoryID <- InvAllDataModel2$CategoryID
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials 
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau","var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 11, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-StudyType.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]])
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- InvAllDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, TypeOfStudy, n) %>% distinct() 
+
+         
+inv <- as.data.frame(es.simCat[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "invasive")
+
+forest1inv <- inv %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+
+### Native performance
+#### organizing model data
+```{r}
+BioticDataModel2 <- BioticDataModel %>% 
+  group_by(TypeOfStudy) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(BioticDataModel2)
+StudyID <- BioticDataModel2$StudyID
+CategoryID <- BioticDataModel2$CategoryID
+natESavemean <- BioticDataModel2$ESNatmean
+natESavesd <- BioticDataModel2$ESNatSD
+M <- max(BioticDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(BioticDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(BioticDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau", "var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 17, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-StudyType.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- BioticDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, TypeOfStudy, n) %>% distinct() 
+
+         
+nat <- as.data.frame(es.simCat[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "native")
+
+forest1nat <- nat %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+```{r echo=FALSE}
+# forest plot of study type, with invasive species and native community ES
+forest1inv <- forest1inv %>% mutate(treatment="c", treatment2=ESInvcolor, shape=21)
+forest1 <- forest1nat %>% mutate(index=index+0.2,
+                                 treatment=ifelse(CategoryID==3, "b", "a"),
+                                 treatment2=ESNatcolor,shape=23) %>% rbind(forest1inv)
+p1<-
+ggplot(data=forest1, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest1, height=.1, size=1, color=forest1$treatment2)+
+  geom_point(data=forest1, size=4, shape=forest1$shape, color=forest1$treatment2, aes(fill=treatment), stroke=1)+
+  scale_y_continuous(name = "", breaks=1:nrow(forest1),trans="reverse",
+                      labels = c("Field experiment", "Greenhouse", "Observational", "",  "", "")
+                     ) +
+  scale_fill_manual(values = c('white', ESNatcolor, ESInvcolor))+
+  coord_cartesian(ylim = c(3.3,0.9), xlim=c(-1.7,2.5), clip = "off")+
+  theme_bw()+ 
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_blank(), # I might need this when stacking them all
+      plot.margin = margin(1,1,1,1),
+      axis.line=element_line(color="black"),
+      panel.border = element_blank()) +  
+  geom_text_repel(aes(label = n), size=3, color=forest1$treatment2)  +
+  annotate("text", x=-1.73, y=0.82, label="(a)", color="black", fontface = "bold", size=4)+
+  ggh4x::force_panelsizes(cols = unit(3, "in"), rows=unit(4, "in"))
+```
+
+## Disturbance
+### Invasive performance
+#### organizing model data
+```{r}
+InvAllDataModel2 <- InvAllDataModel %>% filter(!is.na(Disturbance), Disturbance!="not_reported") %>% 
+  group_by(Disturbance) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID
+CategoryID <- InvAllDataModel2$CategoryID
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau","var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 12, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-Dist.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- InvAllDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, Disturbance, n) %>% distinct() 
+
+         
+inv <- as.data.frame(es.simCat[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "invasive")
+
+forest5inv <- inv %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+### Native performance
+#### organizing the data
+```{r}
+BioticDataModel2 <- BioticDataModel %>% filter(!is.na(Disturbance), Disturbance!="not_reported") %>% 
+  group_by(Disturbance) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(BioticDataModel2)
+StudyID <- BioticDataModel2$StudyID
+CategoryID <- BioticDataModel2$CategoryID
+natESavemean <- BioticDataModel2$ESNatmean
+natESavesd <- BioticDataModel2$ESNatSD
+M <- max(BioticDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(BioticDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(BioticDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials 
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau", "var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 18, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-Dist.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]])
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- BioticDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, Disturbance, n) %>% distinct() 
+
+         
+nat <- as.data.frame(es.simCat[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "native")
+
+forest5nat <- nat %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+```{r echo=FALSE}
+# forest plot of disturbance, with invasive species and native community ES
+forest5inv <- forest5inv %>% mutate(treatment="c", treatment2=ESInvcolor, shape=21)
+forest5 <- forest5nat %>% mutate(index=index+0.2,
+                                 treatment=ifelse(CategoryID==2, "b", "a"),
+                                 treatment2=ESNatcolor, shape=23) %>% rbind(forest5inv)
+
+p5<-
+  ggplot(data=forest5, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest5, height=.1, size=1, color=forest5$treatment2)+  
+  geom_point(data=forest5, size=4, shape=forest5$shape, color=forest5$treatment2, aes(fill=treatment), stroke=1)+
+  scale_y_continuous(name = "", breaks=1:nrow(forest5),trans="reverse",
+                     labels = c("Disturbance\nabsent","Disturbance\npresent","","")) +
+  scale_fill_manual(values = c('white', ESNatcolor, ESInvcolor))+
+  xlab("Effect size (ES, mean + 95%PI)")+
+   coord_cartesian(ylim = c(2.3,0.9), xlim=c(-0.55,1.05), clip = "off")+
+  theme_bw()+ 
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 10),
+      plot.margin = margin(1,1,1,1),
+      axis.line=element_line(color="black"),
+      panel.border = element_blank())+
+  geom_text_repel(aes(label = n), size=3, color=forest5$treatment2) +
+  annotate("text", x=-0.55, y=0.85, label="(e)", color="black", fontface = "bold", size=4, alpha=1)+
+  ggh4x::force_panelsizes( cols = unit(3, "in"), rows = unit(4, "in"))
+```
+
+## Type of disturbance
+### Invasive performance
+#### organizing model data
+```{r}
+InvAllDataModel2 <- InvAllDataModel %>% filter(!is.na(NatureOfDisturbance), NatureOfDisturbance!="not_reported") %>% 
+  group_by(NatureOfDisturbance) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID
+CategoryID <- InvAllDataModel2$CategoryID
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, invESavemean=invESavemean, invESavesd=invESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+invESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "invESavemean.h", "tau","var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 13, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESInv-DistType.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]])
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- InvAllDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, NatureOfDisturbance, n) %>% distinct() 
+
+         
+inv <- as.data.frame(es.simCat[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "invasive")
+
+forest6inv <- inv %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+### Native performance
+#### organizing model data
+```{r}
+BioticDataModel2 <- BioticDataModel %>% filter(!is.na(NatureOfDisturbance), NatureOfDisturbance!="not_reported") %>% 
+  group_by(NatureOfDisturbance) %>% mutate(CategoryID = cur_group_id()) %>% ungroup() %>% 
+  group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup()
+
+J <- nrow(BioticDataModel2)
+StudyID <- BioticDataModel2$StudyID
+CategoryID <- BioticDataModel2$CategoryID
+natESavemean <- BioticDataModel2$ESNatmean
+natESavesd <- BioticDataModel2$ESNatSD
+M <- max(BioticDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(BioticDataModel2$CategoryID))
+R <- K+1 
+W <- length(unique(BioticDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, CategoryID=CategoryID, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+```
+
+#### model
+```{r}
+modelESCat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(iE[i],tau[CategoryID[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[CategoryID[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[CategoryID[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+  
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+
+# parameters
+parameters <- c("beta", "natESavemean.h", "tau","var") 
+
+# running model
+es.simCat <- bugs(datamodel, inits, parameters, model.file = modelESCat, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simCat[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simCat, "beta")
+```
+
++ Model parameters
+```{r parameters 19, echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname))
+write.csv(x, file.path(parametersout, "ESNat-DistType.csv"), row.names = F)
+x
+```
+
++ Model fit
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simCat[["summary"]]) 
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation to plot data
+samplesize <- BioticDataModel2 %>% 
+  group_by(CategoryID) %>%
+  add_tally() %>% ungroup() %>% select(CategoryID, NatureOfDisturbance, n) %>% distinct() 
+
+         
+nat <- as.data.frame(es.simCat[["summary"]])
+nat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^beta", rowname)) %>%
+  mutate(type = "native")
+
+forest6nat <- nat %>%
+  arrange(rowname) %>%
+  mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
+         comparison1 = as.integer(str_sub(rowname,6, 7)),
+         CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
+  mutate_all(na_if,"") %>% 
+  arrange(CategoryID) %>%
+  left_join(samplesize) %>%
+  mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
+         n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
+```
+
+```{r echo=FALSE}
+# forest plot of type of disturbance, with invasive species and native community ES
+forest6inv <- forest6inv %>% mutate(treatment=ifelse(CategoryID==3, "d", "c"), treatment2=ESInvcolor, shape=21)
+forest6 <- forest6nat %>% mutate(index=index+0.2,
+                                 treatment=ifelse(CategoryID==2, "a", "b"),
+                                 treatment2=ESNatcolor, shape=23) %>% rbind(forest6inv)
+
+p6<-
+  ggplot(data=forest6,
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=forest6, height=.1, size=1, color=forest6$treatment2)+
+  geom_point(data=forest6, size=4, shape=forest6$shape, color=forest6$treatment2, aes(fill=treatment), stroke=1)+
+  scale_y_continuous(name = "", breaks=1:nrow(forest6),trans="reverse", 
+                     labels = c("Natural\ndisturbance","Human-induced\ndisturbance","Both types of\ndisturbance","","",""))+
+  scale_fill_manual(values = c(ESNatcolor, 'white', ESInvcolor,'white')) +
+  xlab("Effect size (ES, mean + 95%PI)") + 
+  coord_cartesian(ylim = c(3.3,0.9), xlim=c(-2.2,1.5), clip = "off")+
+  theme_bw()+ 
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 10),
+      plot.margin = margin(1,1,1,1),
+      axis.line=element_line(color="black"),
+      panel.border = element_blank()) + 
+  geom_text_repel(aes(label = n), size=3, color=forest6$treatment2) +
+  annotate("text", x=-2.25, y=0.82, label="(f)", color="black", fontface = "bold", size=4)+
+  ggh4x::force_panelsizes(cols = unit(3, "in"), rows = unit(4, "in"))
+```
+
+
+```{r include=FALSE}
+# overall figure
+p1 <- ggplotGrob(p1)
+p2 <- ggplotGrob(p2)
+p3 <- ggplotGrob(p3)
+p4 <- ggplotGrob(p4)
+p5 <- ggplotGrob(p5)
+p6 <- ggplotGrob(p6)
+
+#showing them all
+png(file.path(graph.wd, "ESNatESInv_variables.png"),width=9.4, height=13, res=300,units="in")
+grid::grid.draw(cbind(rbind(p1,p3,p5), rbind(p2,p4,p6)))
+dev.off()
+```
+
+# **SM: how does invasive species and native community performance vary with disturbance across mechanisms?**
+## Invasive species
+### data preparation
+```{r echo=TRUE}
+# adding information from file with the estimated ES values (with sd) and calculating ES for the observations with no associated variability
+InvAllDataModeltemp <- InvAllDataModel %>% mutate(Disturbance=ifelse(Disturbance=="yes", 1,2), # categories "no disturbance" and "not reported" are aggregated here
+                                               Disturbance=ifelse(is.na(Disturbance),2,Disturbance),
+                                              Type=ifelse(NatureOfDisturbance=="not_reported"|is.na(NatureOfDisturbance),4,NatureOfDisturbance),
+                                              Type=as.integer(Type),
+                                              Type=ifelse(Disturbance==2,5,Type))  
+
+InvAllDataModel2 <- InvAllDataModeltemp %>% 
+  group_by(Mechanism, Disturbance) %>%
+  add_tally() %>% 
+  group_by(Mechanism, Disturbance, Type) %>%
+  add_tally() %>% filter(n>1,nn>1) %>% group_by(StudyID) %>% mutate(StudyID = cur_group_id()) %>% ungroup() %>% select(-n, -nn)
+
+# Observations with one sample size
+InvAllDataModelEXCLUDED <- InvAllDataModeltemp %>% 
+  group_by(Mechanism, Disturbance) %>%
+  add_tally() %>% 
+  group_by(Mechanism, Disturbance, Type) %>%
+  add_tally() %>% filter(n==1|nn==1) %>% 
+  select(Mechanism, Disturbance, Type, ESInvmean, ESInvSD) %>% filter(!is.na(ESInvSD))
+```
+
+#### organizing model data
+```{r}
+J <- nrow(InvAllDataModel2)
+StudyID <- InvAllDataModel2$StudyID 
+Mechanism <- InvAllDataModel2$Mechanism
+Disturbance <- InvAllDataModel2$Disturbance
+Type <- InvAllDataModel2$Type 
+invESavemean <- InvAllDataModel2$ESInvmean
+invESavesd <- InvAllDataModel2$ESInvSD
+M <- max(InvAllDataModel2$ESInvSD, na.rm = T) 
+K <- length(unique(InvAllDataModel2$Mechanism))
+R <- 1 
+W <- length(unique(InvAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, Mechanism=Mechanism, Disturbance=Disturbance, 
+                   Type=Type, invESavemean=invESavemean, invESavesd=invESavesd, 
+                   M=M, R=R, W=W, K=K)
+```
+
+#### model 
+```{r}
+# hierarchical model
+modelESInv <- function() {
+  for(i in 1:J){
+# missing values
+invESavesd[i]~dnorm(M,1)%_%C(0,) 
+
+tauI[i]<-1/(invESavesd[i]*invESavesd[i])
+
+invESavemean[i]~dnorm(iE[i],tauAll[Mechanism[i]])
+invESavemean.h[i]~dnorm(iE[i],tauAll[Mechanism[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[Mechanism[i],Disturbance[i],Type[i]]+iSRE[StudyID[i]]+ie[i]
+
+}
+
+# priors
+    beta[1,1,1]~dnorm(BB[1,1],tauBB[1,1])
+    beta[1,1,2]~dnorm(BB[1,1],tauBB[1,1])
+    beta[1,1,3]<-0 #no data (sample size 1)
+    beta[1,1,4]<-0 #no data
+    beta[1,2,1]<-0 #no data
+    beta[1,2,2]<-0 #no data
+    beta[1,2,3]<-0 #no data
+    beta[1,2,4]<-0 #no data
+    beta[1,2,5]<-0 #no data (sample size 1)
+    beta[2,1,1]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,1,2]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,1,3]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,1,4]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,2,1]<-0 #no data
+    beta[2,2,2]<-0 #no data
+    beta[2,2,3]<-0 #no data
+    beta[2,2,4]<-0 #no data
+    beta[2,2,5]<-BB[2,2] #single subcategory
+    beta[3,1,1]~dnorm(BB[3,1],tauBB[3,1])
+    beta[3,1,2]~dnorm(BB[3,1],tauBB[3,1])
+    beta[3,1,3]~dnorm(BB[3,1],tauBB[3,1])
+    beta[3,1,4]~dnorm(BB[3,1],tauBB[3,1])
+    beta[3,2,1]<-0 #no data
+    beta[3,2,2]<-0 #no data
+    beta[3,2,3]<-0 #no data
+    beta[3,2,4]<-0 #no data
+    beta[3,2,5]<-BB[3,2] #single subcategory
+    
+    BB[1,1]~dnorm(B[1],tauB[1])
+    tauBB[1,1]<-1/varBB[1,1]
+    varBB[1,1]~dunif(0,1)
+    
+    BB[1,2]<-0
+    
+    BB[2,1]~dnorm(B[2],tauB[2])
+    tauBB[2,1]<-1/varBB[2,1]
+    varBB[2,1]~dunif(0,1)
+
+    BB[2,2]~dnorm(B[2],tauB[2])
+
+    BB[3,1]~dnorm(B[3],tauB[3])
+    tauBB[3,1]<-1/varBB[3,1]
+    varBB[3,1]~dunif(0,1)
+
+    BB[3,2]~dnorm(B[3],tauB[3])
+
+B[1]~dnorm(0,0.1)
+tauB[1]<-1/varB[1]
+varB[1]~dunif(0,1)
+
+B[2]~dnorm(0,0.1)
+tauB[2]<-1/varB[2]
+varB[2]~dunif(0,1)
+
+B[3]~dnorm(0,0.1)
+tauB[3]<-1/varB[3]
+varB[3]~dunif(0,1)
+
+for(i in 1:W){ 
+iSRE[i]~dnorm(0,tau[R])
+}
+
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,1)
+}
+
+    for(i in 1:K){
+tauAll[i]<-1/varAll[i]
+varAll[i]~dunif(0,1)
+    }
+
+} # end model
+
+# initials 
+inits <- list(
+  list(beta = c(rep(2, times=12)),
+       var = c(rep(0.5, times=R)), 
+       varBB=c(rep(0.5,times=3)),
+       varB=c(rep(0.5,times=K)), 
+       varAll=c(rep(1,times=K))),
+  
+  list(beta = c(rep(-1, times=12)), 
+       var = c(rep(0.5, times=R)),
+       varBB=c(rep(0.5,times=3)), 
+       varB=c(rep(0.5,times=K)), 
+       varAll=c(rep(1,times=K))),
+  
+  list(beta = c(rep(0, times=12)), 
+       var = c(rep(0.5, times=R)),
+       varBB=c(rep(0.5,times=3)), 
+       varB=c(rep(0.5,times=K)), 
+       varAll=c(rep(1,times=K)))
+)
+
+# parameters
+parameters <- c("B", "BB", "beta", "invESavemean.h", "tau", 
+                "tauAll", "tauB", "tauBB", "varB", "varBB", "var")
+# running model
+es.simInvDist <- bugs(datamodel, inits, parameters, model.file = modelESInv, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simInvDist[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simInvDist, "beta")
+traplot(es.simInvDist, "B")
+traplot(es.simInvDist, "BB")
+```
+
++ Model parameters
+```{r parameters 6, echo=FALSE}
+x<-as.data.frame(es.simInvDist[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname)|
+                                                     grepl("^B", rowname))
+write.csv(x, file.path(parametersout, "ESInv-Disturbance.csv"), row.names = F)
+x
+```
+
++ Model fit:
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simInvDist[["summary"]]) 
+invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(invESavemean.h,invESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+
+```
+
+```{r include=FALSE}
+# data preparation for plot (invasive ES)
+samplesize2 <- InvAllDataModel2 %>% 
+  group_by(Mechanism) %>%
+  add_tally() %>% ungroup() %>% mutate(Disturbance=NA, Type=NA) %>% 
+  select(Mechanism, Disturbance, Type, n) %>% distinct() %>% arrange(Mechanism) %>% 
+  mutate(index=c(1,6,13),
+         size=14,
+         label=c("Propagule pressure", "Empty niches", "Low biotic resistance"),
+         n=ifelse(index==1, n+1, n),shape=21,sizedot=6,treatment=c("a","a","a"))  
+
+samplesize3 <- InvAllDataModel2 %>% 
+  group_by(Mechanism, Disturbance) %>%
+  add_tally() %>% ungroup() %>% mutate(Type=NA) %>% 
+  select(Mechanism, Disturbance, Type, n) %>% distinct() %>% arrange(Mechanism, Disturbance) %>%
+  mutate(index=c(3,8,7,15,14),shape=21,sizedot=5,size=12,treatment=c("a","b","b","b","b"),
+         label=c("Disturbance","Disturbance","No disturbance","Disturbance","No disturbance"))
+
+samplesize <- InvAllDataModel2 %>% 
+  group_by(Mechanism, Disturbance, Type) %>%
+  add_tally() %>% ungroup() %>% select(Mechanism, Disturbance, Type, n) %>% distinct() %>% 
+ arrange(Mechanism, Disturbance, Type) %>% 
+  mutate(index=c(4,5,9,10,11,12,NA,16,17,18,19, NA),size=10,
+         label=c("Natural","Human","Natural","Human","Both","Not reported",NA,"Natural","Human","Both","Not reported",NA),shape=21,sizedot=4,treatment=c("b","b","b","b","b","b",NA,"b","b","b","b",NA)) %>% 
+  filter(!is.na(index)) %>% 
+ rbind(samplesize2) %>% rbind(samplesize3) %>% mutate(n = paste0('(', n, ')')) 
+
+ESInvEXCLUDED <- InvAllDataModelEXCLUDED %>% mutate(rowname="BB[1,2]",name="BB", `2.5%`=ESInvmean-(ESInvSD*2),
+                                                    `97.5%`=ESInvmean+(ESInvSD*2),
+                                                    n = paste0('(', 1, ')'),
+                                                    index=2,size=12,shape=21,sizedot=5,treatment="a",
+                                                    label="No disturbance") %>% 
+  rename(mean=ESInvmean, sd=ESInvSD)
+         
+inv <- as.data.frame(es.simInvDist[["summary"]])
+forestinv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(!grepl("^invESavemean.h", rowname),
+         !grepl("^tau", rowname),
+         !grepl("^var", rowname),
+         rowname != "deviance") %>% 
+  separate(col=rowname, remove=F, into=c("name","Mechanism","Disturbance","Type")) %>% 
+  mutate(Disturbance=as.numeric(Disturbance),
+         Mechanism=as.numeric(Mechanism),
+         Type=as.numeric(Type)) %>% 
+  mutate_all(na_if,"") %>% 
+  left_join(samplesize) %>% 
+  filter(!is.na(index)) %>% 
+  rbind(ESInvEXCLUDED) %>% 
+  arrange(index) %>% 
+  mutate(treatment2=ESInvcolor)
+```
+
+
+## Native community
+### data preparation
+```{r}
+# adding information from file with the estimated ES values (with sd) and calculating ES for the observations with no associated variability
+NatAllDataModeltemp <- data %>% filter(ObsIDOriginal %in% NatUniqueBiotic$ObsIDOriginal) %>% 
+  left_join(NatBioticEstimate, by = "ObsIDOriginal") %>%
+  mutate(ESNatmean = ifelse(is.na(ESNatmean), ((NatTreatmean-NatContmean)/((NatTreatmean+NatContmean)/2)), ESNatmean),
+         ObsID = row_number()) %>% mutate(Disturbance=ifelse(Disturbance=="yes", 1,2), # categories "no disturbance" and "not reported" are aggregated here
+                                               Disturbance=ifelse(is.na(Disturbance),2,Disturbance),
+                                              Type=ifelse(NatureOfDisturbance=="not_reported"|is.na(NatureOfDisturbance),4,NatureOfDisturbance),
+                                              Type=as.integer(Type),
+                                              Type=ifelse(Disturbance==2,5,Type)) 
+
+NatAllDataModel2 <- NatAllDataModeltemp %>% 
+  group_by(Mechanism, Disturbance) %>%
+  add_tally() %>% 
+  group_by(Mechanism, Disturbance, Type) %>%
+  add_tally() %>% filter(n>1,nn>1) %>% group_by(StudyIDOriginal) %>% mutate(StudyID = cur_group_id()) %>% ungroup() %>% select(-n, -nn)
+
+NatAllDataModelEXCLUDED <- NatAllDataModeltemp %>% 
+  group_by(Mechanism, Disturbance) %>%
+  add_tally() %>% 
+  group_by(Mechanism, Disturbance, Type) %>%
+  add_tally() %>% filter(n==1|nn==1) %>% # two observations with a single sample size. will include the one with reported sd later in the graph
+  select(Mechanism, Disturbance, Type, ESNatmean, ESNatSD) %>% filter(!is.na(ESNatSD)) %>% ungroup() 
+```
+
+#### organizing model data
+```{r}
+J <- nrow(NatAllDataModel2)
+StudyID <- NatAllDataModel2$StudyID 
+Mechanism <- NatAllDataModel2$Mechanism
+Disturbance <- NatAllDataModel2$Disturbance
+Type <- NatAllDataModel2$Type # disturbance type
+natESavemean <- NatAllDataModel2$ESNatmean
+natESavesd <- NatAllDataModel2$ESNatSD
+M <- max(NatAllDataModel2$ESNatSD, na.rm = T) 
+K <- length(unique(NatAllDataModel2$Mechanism))
+R <- 1  
+W <- length(unique(NatAllDataModel2$StudyID))
+
+datamodel <- list (J=J, StudyID=StudyID, Mechanism=Mechanism, Disturbance=Disturbance, Type=Type, natESavemean=natESavemean, natESavesd=natESavesd, M=M, R=R, W=W, K=K)
+```
+
+#### model 
+```{r}
+# hierarchical model
+modelESNat <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,) # M=maximum variance
+
+tauN[i]<-1/(natESavesd[i]*natESavesd[i])
+
+natESavemean[i]~dnorm(nE[i],tauAll[Mechanism[i]])
+natESavemean.h[i]~dnorm(nE[i],tauAll[Mechanism[i]])
+ne[i]~dnorm(0,tauN[i])
+nE[i]<-beta[Mechanism[i],Disturbance[i],Type[i]]+iSRE[StudyID[i]]+ne[i]
+
+}
+
+# priors
+    beta[1,1,1]<-0 #no data
+    beta[1,1,2]<-B[1]
+    beta[1,1,3]<-0 #no data (sample size 1)
+    beta[1,1,4]<-0 #no data
+    beta[1,2,1]<-0 #no data
+    beta[1,2,2]<-0 #no data
+    beta[1,2,3]<-0 #no data
+    beta[1,2,4]<-0 #no data
+    beta[1,2,5]<-0 #no data (sample size 1)
+    beta[2,1,1]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,1,2]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,1,3]~dnorm(BB[2,1],tauBB[2,1])
+    beta[2,1,4]<-0 #no data
+    beta[2,2,1]<-0 #no data
+    beta[2,2,2]<-0 #no data
+    beta[2,2,3]<-0 #no data
+    beta[2,2,4]<-0 #no data
+    beta[2,2,5]<-BB[2,2] #single subcategory
+    beta[3,1,1]<-0 #no data
+    beta[3,1,2]~dnorm(BB[3,1],tauBB[3,1])
+    beta[3,1,3]~dnorm(BB[3,1],tauBB[3,1])
+    beta[3,1,4]<-0 #no data
+    beta[3,2,1]<-0 #no data
+    beta[3,2,2]<-0 #no data
+    beta[3,2,3]<-0 #no data
+    beta[3,2,4]<-0 #no data
+    beta[3,2,5]<-BB[3,2] #single subcategory
+    
+    BB[1,1]<-B[1]
+
+    BB[1,2]<-0
+
+    BB[2,1]~dnorm(B[2],tauB[1])
+    tauBB[2,1]<-1/varBB[2,1]
+    varBB[2,1]~dunif(0,1)
+
+    BB[2,2]~dnorm(B[2],tauB[1])
+
+    BB[3,1]~dnorm(B[3],tauB[2])
+    tauBB[3,1]<-1/varBB[3,1]
+    varBB[3,1]~dunif(0,1)
+
+    BB[3,2]~dnorm(B[3],tauB[2])
+
+B[1]~dnorm(0,0.1)
+
+B[2]~dnorm(0,0.1)
+tauB[1]<-1/varB[1]
+varB[1]~dunif(0,1)
+
+B[3]~dnorm(0,0.1)
+tauB[2]<-1/varB[2]
+varB[2]~dunif(0,1)
+
+for(i in 1:W){ # SRE
+iSRE[i]~dnorm(0,tau[R])
+}
+
+  for(i in 1:R){ 
+tau[i]<-1/var[i]
+var[i]~dunif(0,1)
+  }
+
+for(i in 1:K){    
+tauAll[i]<-1/varAll[i]
+varAll[i]~dunif(0,1)
+}
+    
+} # end model
+
+# initials
+inits <- list(
+  list(beta = c(rep(2, times=8)), #number of betas
+       var = c(rep(0.5, times=R)), #one tau for all studies
+       varBB=c(rep(0.5,times=2)), #number of varBB
+       varB=c(rep(0.5,times=K-1)), #number of mechanisms, 3
+       varAll=c(rep(1,times=K))),
+  
+  list(beta = c(rep(-2, times=8)), 
+       var = c(rep(0.5, times=R)),
+       varBB=c(rep(0.5,times=2)), 
+       varB=c(rep(0.5,times=K-1)), 
+       varAll=c(rep(1,times=K))),
+  
+  list(beta = c(rep(0, times=8)), 
+       var = c(rep(0.5, times=R)),
+       varBB=c(rep(0.5,times=2)), 
+       varB=c(rep(0.5,times=K-1)), 
+       varAll=c(rep(1,times=K)))
+)
+
+# parameters
+parameters <- c("B", "BB", "beta", "natESavemean.h", "tau", "tauAll", "tauB", "tauBB", "varB", "varBB", "var")
+
+# running model
+es.simNatDist <- bugs(datamodel, inits, parameters, model.file = modelESNat, n.chains=3, n.burnin=25000, n.iter=75000, debug=F)
+```
+
++ DIC value:
+```{r echo=FALSE}
+es.simNatDist[["DIC"]]
+```
+
++ Trace plots
+
+```{r echo=FALSE}
+traplot(es.simNatDist, "beta")
+traplot(es.simNatDist, "B")
+traplot(es.simNatDist, "BB")
+```
+
++ Model parameters 
+```{r parameters 7, echo=FALSE}
+x<-as.data.frame(es.simNatDist[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^beta", rowname)|
+                                                   grepl("^var", rowname)|
+                                                     grepl("^B", rowname))
+write.csv(x, file.path(parametersout, "ESNat-Disturbance.csv"), row.names = F)
+x
+```
+
+
++ Model fit:
+
+```{r echo=FALSE}
+x<-as.data.frame(es.simNatDist[["summary"]])
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) 
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+plot(predicted~estimated, data = data3, main = "ESNatmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = -1, y = 0.5, labels = mylabel)
+```
+
+```{r include=FALSE}
+# data preparation for plot (native ES)
+
+samplesize2 <- NatAllDataModel2 %>% 
+  group_by(Mechanism) %>%
+  add_tally() %>% ungroup() %>% mutate(Disturbance=NA, Type=NA) %>% 
+  select(Mechanism, Disturbance, Type, n) %>% distinct() %>% arrange(Mechanism) %>% 
+  mutate(index=c(1,5,11),
+         size=14, # size font
+         label=c("Propagule pressure", "Empty niches", "Low biotic resistance"),
+         n=ifelse(index==1|index==11, n+1, n),shape=23,sizedot=6,treatment="a") # a=non significant 
+
+samplesize3 <- NatAllDataModel2 %>% 
+  group_by(Mechanism, Disturbance) %>%
+  add_tally() %>% ungroup() %>% mutate(Type=NA) %>% 
+  select(Mechanism, Disturbance, Type, n) %>% distinct() %>% arrange(Mechanism, Disturbance) %>%
+  mutate(index=c(2,7,6,13,12),shape=23,sizedot=5,size=12,treatment=c("a","a","a","a","a"),
+         label=c("Disturbance","Disturbance","No disturbance","Disturbance","No disturbance"))
+
+samplesize <- NatAllDataModel2 %>% 
+  group_by(Mechanism, Disturbance, Type) %>%
+  add_tally() %>% ungroup() %>% select(Mechanism, Disturbance, Type, n) %>% distinct() %>% 
+ arrange(Mechanism, Disturbance, Type) %>% 
+  mutate(index=c(4,8,9,10,NA,15,16,NA),size=10,
+         label=c("Human","Natural","Human","Both",NA,"Human","Both",NA),
+         shape=23,sizedot=4,treatment=c("a","a","a","a",NA,"a","a",NA)) %>% 
+  filter(!is.na(index)) %>% 
+ rbind(samplesize2) %>% rbind(samplesize3) %>% mutate(n = paste0('(', n, ')')) 
+
+ESNatEXCLUDED <- NatAllDataModelEXCLUDED %>% mutate(rowname=c("beta[1,1,1]","beta[3,1,1]"),name=c("beta","beta"),
+                                                    `2.5%`=ESNatmean-(ESNatSD*2),
+                                                    `97.5%`=ESNatmean+(ESNatSD*2),
+                                                    n = paste0('(', 1, ')'),
+                                                    index=c(3,14),size=10,shape=23,sizedot=5,treatment=c("b","b"),
+                                                    label=c("Natural","Natural")) %>% 
+  rename(mean=ESNatmean, sd=ESNatSD)
+         
+nat <- as.data.frame(es.simNatDist[["summary"]])
+forestnat <- nat %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(!grepl("^natESavemean.h", rowname),
+         !grepl("^tau", rowname),
+         !grepl("^var", rowname),
+         rowname != "deviance") %>% 
+  separate(col=rowname, remove=F, into=c("name","Mechanism","Disturbance","Type")) %>% 
+  mutate(Disturbance=as.numeric(Disturbance),
+         Mechanism=as.numeric(Mechanism),
+         Type=as.numeric(Type)) %>% 
+  mutate_all(na_if,"") %>% 
+  left_join(samplesize) %>% 
+  filter(!is.na(index)) %>% 
+  rbind(ESNatEXCLUDED) %>% 
+  arrange(index) %>% 
+  mutate(treatment2=ESNatcolor)
+```
+
+```{r include=FALSE}
+# figure with invasive species and native community performance together (mechanism = propagule pressure)
+PPnat <- forestnat %>% filter(Mechanism==1) %>% mutate(category="nat")
+
+PPinv <- forestinv %>% filter(Mechanism==1) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
+
+PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% mutate(rowname=ifelse(is.na(rowname),row_number(),rowname),
+                                                    category=ifelse(rowname=="10","nat",
+                                                            ifelse(rowname=="11","inv",
+                                                            ifelse(rowname=="12","nat",
+                                                            ifelse(rowname=="13","inv",category)))),
+                                                    rowname=ifelse(rowname=="10","BB[1,2]",
+                                                            ifelse(rowname=="11","beta[1,1,3]",
+                                                            ifelse(rowname=="12","beta[1,1,3]",
+                                                            ifelse(rowname=="13","beta[1,1,4]",rowname))))) %>%
+  group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[1,2]", index-1,ifelse(rowname=="BB[1,1]", index+1,index))) %>% arrange(index)
+
+ p1<-
+  ggplot(data=PP, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=PP, height=.1, size=1, color=PP$treatment2)+
+  geom_point(data=PP, shape=PP$shape,size=PP$sizedot, color=PP$treatment2,aes(fill=treatment),stroke=1)+ 
+  scale_y_continuous(name = "",
+                     labels = c("Overall","No disturbance","Disturbance","Natural","Human","Both","Not reported","","","","","",""),
+                     breaks=1:nrow(PP), trans="reverse")+
+  scale_fill_manual(values = c('white', ESNatcolor, "white", ESInvcolor))+
+  theme_bw()+
+  ggtitle("Propagule pressure")+
+  scale_x_continuous(expand = c(0.05,0.05))+
+  coord_cartesian(ylim=c(7.1,0.95),xlim=c(-2.5,2.5),clip = "off")+
+  xlab("Effect size (ES, mean + 95%PI)") +
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      axis.text.y = element_text(size=c(14,12,12,10,10,10,10,10,10),
+                                 face=c("bold","plain","plain","plain","plain","plain","plain","plain","plain")),
+      axis.text.x=element_text(size=10),
+      panel.border = element_blank(),
+      axis.title.y = element_blank(),
+      plot.title = element_text(face = "bold",hjust = 0.5),
+      plot.margin = margin(1,1,1,1),#defines margin so the graph does not cut off 
+      axis.line = element_line(colour = "black"),
+      legend.position = "none") +    #remove top and right panel boundaries
+  geom_text_repel(aes(label = n), size=4, color=PP$treatment2)+
+  annotate("text", x=-2.55, y=0.35, label="(a)", color="black", fontface = "bold", size=5)+
+  ggh4x::force_panelsizes(rows = unit(4.5, "in"), cols = unit(4, "in"))
+
+```
+
+```{r include=FALSE}
+# figure with invasive species and native community performance together (mechanism = biotic resistance)
+BRnat <- forestnat %>% filter(Mechanism==3) %>% mutate(category="nat")
+
+BRinv <- forestinv %>% filter(Mechanism==3) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
+
+BR <- BRnat %>% rbind(BRinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[3,2]", index-1,ifelse(rowname=="BB[3,1]", index+1,index))) %>% arrange(index)
+
+p2<-
+  ggplot(data=BR, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=BR, height=.1, size=1, color=BR$treatment2)+
+  geom_point(data=BR, shape=BR$shape,size=BR$sizedot, color=BR$treatment2,aes(fill=treatment),stroke=1)+ 
+  scale_y_continuous(name = "",
+                     labels = NULL,
+                     breaks=1:nrow(BR), trans="reverse")+
+  scale_fill_manual(values = c('white', ESNatcolor, 'white', ESInvcolor))+
+  theme_bw()+
+  scale_x_continuous(expand = c(0.05,0.05))+
+  coord_cartesian(ylim=c(7.1,0.95),xlim=c(-1.6,1.6),clip = "off")+
+  xlab("Effect size (ES, mean + 95%PI)") +
+  ggtitle("Low biotic resistance")+
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      axis.text.y = element_text(size=c(14,12,12,10,10,10,10,10,10),
+                                 face=c("bold","plain","plain","plain","plain","plain","plain","plain","plain")),
+      axis.text.x=element_text(size=10),
+      panel.border = element_blank(),
+      axis.title.y = element_blank(),
+      plot.title = element_text(face = "bold",hjust = 0.5),
+      plot.margin = margin(1,1,1,10),#defines margin so the graph does not cut off (top,right,below,left)
+      axis.line = element_line(colour = "black"),
+      legend.position = "none") +    #remove top and right panel boundaries
+  geom_text_repel(aes(label = n), size=4, color=BR$treatment2)+
+  annotate("text", x=-1.65, y=0.32, label="(b)", color="black", fontface = "bold", size=5)+
+  ggh4x::force_panelsizes(rows = unit(4.5, "in"), cols = unit(4, "in"))
+```
+
+```{r include=FALSE}
+# figure with invasive species and native community performance together (mechanism = empty niches)
+ENnat <- forestnat %>% filter(Mechanism==2) %>% mutate(category="nat")
+
+ENinv <- forestinv %>% filter(Mechanism==2) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
+
+EN <- ENnat %>% rbind(ENinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[2,2]", index-1,ifelse(rowname=="BB[2,1]", index+1,index))) %>% arrange(index)
+
+ p3<-
+  ggplot(data=EN, 
+       aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`)) +
+  geom_vline(xintercept=0, color="black", linetype="dashed", alpha=.5, size=1)+
+  geom_errorbarh(data=EN, height=.1, size=1, color=EN$treatment2)+
+  geom_point(data=EN, shape=EN$shape,size=EN$sizedot, color=EN$treatment2,aes(fill=treatment),stroke=1)+ 
+  scale_y_continuous(name = "",
+                     labels=NULL,
+                     breaks=1:nrow(EN), trans="reverse")+
+  scale_fill_manual(values = c('white', "white", ESInvcolor))+
+  theme_bw()+
+  ggtitle("Empty niches")+
+  scale_x_continuous(expand = c(0.05,0.05))+
+  coord_cartesian(ylim=c(7.1,0.95),xlim=c(-1.3,1.8),clip = "off")+
+  xlab("Effect size (ES, mean + 95%PI)") +
+  theme(text=element_text(size=13, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      axis.text.y = element_text(size=c(14,12,12,10,10,10,10,10,10),
+                                 face=c("bold","plain","plain","plain","plain","plain","plain","plain","plain")),
+      axis.text.x=element_text(size=10),
+      panel.border = element_blank(),
+      axis.title.y = element_blank(),
+      plot.title = element_text(face = "bold",hjust = 0.5),
+      plot.margin = margin(1,1,1,10),#defines margin so the graph does not cut off 
+      axis.line = element_line(colour = "black"),
+      legend.position = "none") +    #remove top and right panel boundaries
+  geom_text_repel(aes(label = n), size=4, color=EN$treatment2)+
+  annotate("text", x=-1.35, y=0.32, label="(c)", color="black", fontface = "bold", size=5)+
+  ggh4x::force_panelsizes(rows = unit(4.5, "in"), cols = unit(4, "in"))
+```
+
+```{r include=FALSE}
+p1 <- ggplotGrob(p1)
+p2 <- ggplotGrob(p2)
+p3 <- ggplotGrob(p3)
+
+# showing them all
+png(file.path(graph.wd, "ESNatESInv_Dist.png"),width=13.8, height=5.5, res=300,units="in")
+grid::grid.draw(cbind(p1,p2,p3)) 
+dev.off()
+```
+
+
+# **SM: The World Map**
+
+```{r coord objt, include=FALSE}
+sites_coord <- data %>%
+  rename(Latitude=Lat_m,
+         Longitude=Long_m) %>% 
+  select(StudyIDOriginal, Latitude, Longitude, Country) %>% #selects just a few of the columns
+  distinct(StudyIDOriginal, .keep_all = TRUE) %>% #removes duplicates due to several data entries for the same
+  filter(!is.na(Latitude)) # removes studies that the coordinates were not entered
+sites_coord <- st_as_sf(sites_coord, coords = c("Longitude", "Latitude"), remove = FALSE, 
+    crs = 4326, agr = "constant")
+```
+
+```{r world map, echo=FALSE}
+world <- ne_countries(scale = "medium", returnclass = "sf") #creates the object with the map
+ggplot(data = world) + #plot the object as a map
+    geom_sf() + 
+  coord_sf(expand = FALSE) + #this makes the coordinates to show up
+    geom_point(data = sites_coord, aes(x = Longitude, y = Latitude), size = 4, #specifies the data
+        shape = 21, fill = "darkred") + #specifies how the dots will show
+  theme(panel.border = element_blank()) +
+  theme(plot.margin = unit(c(0,0.5,0,0.5), "cm")) +
+    annotation_north_arrow(location = "bl", which_north = "true", 
+        pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+        style = north_arrow_fancy_orienteering) +
+    xlab("Longitude") + ylab("Latitude") +
+    ylim(-60,NA) + #defining the limits in the yaxis, NA to indicate that automatic upper limit
+    ggtitle("World map of study sites included in the meta-analysis", 
+            subtitle = paste0("(", length(unique(sites_coord$StudyIDOriginal)), " studies from ", length(unique(sites_coord$Country)), " countries)")) 
+# saves
+ggsave(file.path(graph.wd,paste(c("map", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")), dpi=300, scale=2, width=7, height=3.2) #saves the last generated plot
+```
+
+# **SM: Funnel plots**
+```{r include=FALSE}
+# Invasive performance
+glimpse(InvEstimate)
+
+InvEstimateFP <- InvEstimate %>%
+  mutate(ESInvSD2 = ESInvSD*2,
+         Variance = 1/(ESInvSD^2))
+
+plot1<-ggplot(InvEstimateFP) +
+  geom_point(data=InvEstimateFP,
+       aes(y=Variance, x=ESInvmean), size=2) +
+  geom_errorbarh(data=InvEstimateFP, aes(y=Variance, xmax = ESInvmean + ESInvSD2, xmin = ESInvmean - ESInvSD2, height=5000)) +
+  scale_y_continuous(limits = c(-5000, 170000), 
+                     labels = function(x) format(x, scientific = TRUE)) + # yaxis as scientific notation
+  geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1) +
+  ylab("1/ESvariance") +
+  xlab("ES (mean+2SD)") +
+  ggtitle("(a) ES Invasive species\nperformance") +
+    theme(text=element_text(size=10, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 10),
+       plot.title = element_text(size=10),
+      plot.margin = margin(2,20,2,2),#defines margin so the graph does not cut off 
+      axis.line = element_line(colour = "black"),
+      panel.border = element_blank())
+```
+
+```{r include=FALSE}
+# Native Performance
+glimpse(NatBioticEstimate)
+
+NatBioticEstimateFP <- NatBioticEstimate  %>%
+  mutate(ESNatSD2 = ESNatSD*2,
+         Variance = 1/(ESNatSD^2))
+
+plot2<-ggplot(NatBioticEstimateFP) +
+  geom_point(data=NatBioticEstimateFP,
+       aes(y=Variance, x=ESNatmean), size=2) +
+  geom_errorbarh(data=NatBioticEstimateFP, aes(y=Variance, xmax = ESNatmean + ESNatSD2, xmin = ESNatmean - ESNatSD2, height=100000)) +
+  scale_y_continuous(limits = c(-100000, 1400000), 
+                     labels = function(x) format(x, scientific = TRUE)) + # yaxis as scientific notation
+  geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1) +
+  xlab("ES (mean+2SD)") +
+  ggtitle("(b) ES Native community\nperformance") +
+    theme(text=element_text(size=10, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 10),
+      axis.title.y = element_blank(),
+       plot.title = element_text(size=10),
+      plot.margin = margin(2,20,2,2),#defines margin so the graph does not cut off 
+      axis.line = element_line(colour = "black"),
+      panel.border = element_blank())
+```
+
+```{r include=FALSE}
+# Abiotic ES
+glimpse(NatAbioticEstimate)
+
+NatAbioticEstimateFP <- NatAbioticEstimate  %>%
+  mutate(ESNatSD2 = ESNatSD*2,
+         Variance = 1/(ESNatSD^2))
+
+plot3<-ggplot(NatAbioticEstimateFP) +
+  geom_point(data=NatAbioticEstimateFP,
+       aes(y=Variance, x=ESNatmean), size=2) +
+  geom_errorbarh(data=NatAbioticEstimateFP, aes(y=Variance, xmax = ESNatmean + ESNatSD2, xmin = ESNatmean - ESNatSD2, height=10000)) +
+  scale_y_continuous(limits = c(-10000, 250000), 
+                     labels = function(x) format(x, scientific = TRUE)) + # yaxis as scientific notation
+  geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1) +
+  xlab("ES (mean+2SD)") +
+  ggtitle("(c) ES Abiotic") +
+    theme(text=element_text(size=10, color="black"),
+      panel.spacing = unit(1, "lines"),
+      panel.grid = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_text(size = 10),
+      axis.title.y = element_blank(),
+      plot.margin = margin(2,20,2,2),#defines margin so the graph does not cut off 
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size=10),
+      panel.border = element_blank())
+```
+
+```{r echo=FALSE}
+par(mfrow = c(1, 3))
+plot1
+plot2
+plot3
+dev.off()
+```
+
+
+```{r warning=FALSE, include=FALSE}
+p1 <- ggplotGrob(plot1)
+p2 <- ggplotGrob(plot2)
+p3 <- ggplotGrob(plot3)
+
+# saves
+grid::grid.newpage()
+png(file.path(graph.wd, "FunnelPlots.png"),width=8, height=3, res=300,units="in")
+grid::grid.draw(rbind(cbind(p1,p2, p3))) # allow graphs to align right
+dev.off()
+```
