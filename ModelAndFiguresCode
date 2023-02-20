@@ -101,12 +101,11 @@ ESInvcolor <- x[2,]
 # **Importing data**
 ```{r, echo=FALSE}
 # Importing the data 
-data <- read.csv(file.path(datain, "data_InvShrub_final.csv"))
+data <- read.csv(file.path(datain, "Data.csv"))
 # Effect size (ES) estimates
 InvEstimate <- read.csv(file.path(datain, "InvEstimateRESULTS.csv"))
 NatBioticEstimate <- read.csv(file.path(datain, "NatBioticEstimateRESULTS.csv"))
 NatAbioticEstimate <- read.csv(file.path(datain, "NatAbioticEstimateRESULTS.csv"))
-AuthorYear <- read.csv(file.path(datain, "AuthorYear.csv"))
 ```
 Column names are reported in the supplementary material
 ```{r importing the estimated data, include=TRUE}
