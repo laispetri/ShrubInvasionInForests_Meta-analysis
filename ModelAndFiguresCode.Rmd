@@ -21,7 +21,7 @@ editor_options:
 4. Analysis and figures presented in the Supplementary material (SM) are placed at the end of this code, after
 the main questions are tackled.
 5. You will need to create the following folders in the working directory: "data", "figures", and "parameters".
-6. Paste the files from this webpage (**figshare**) inside of the "data" folder you just created.
+6. Paste the files from this webpage (https://doi.org/10.5061/dryad.msbcc2g33) inside of the "data" folder you just created.
 7. Note: figures included in the main manuscript or SM will not be displayed in the html file after knitting. They will be inside of the folder you created, "figures". The aspect ratio could not be maintained when knitting (probably due to my own coding limitation).
 
 ```{r setup, include=FALSE}
