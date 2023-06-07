@@ -26,7 +26,7 @@ the main questions are tackled.
 
 ```{r setup, include=FALSE}
 # suppress warnings and messages in case you decide to knit this file
-knitr::opts_chunk$set(echo = TRUE) 
+knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ```
 
@@ -57,7 +57,7 @@ require(R2OpenBUGS)
 require(mcmcplots)
 
 ## graphs
-require(inlmisc) 
+require(pals) 
 require(patchwork)
 require(egg) 
 
@@ -76,26 +76,24 @@ parametersout <- file.path(workingdir, "parameters")
 ```{r include=FALSE}
 # Defining colors that will be used later on in the figures
 ## mechanisms
-x<-as.data.frame(inlmisc::GetColors(3, scheme = "bright"))
-BRcolor <- x[1,]
+x<-as.data.frame(pals::brewer.dark2(3))
+BRcolor <- x[3,]
 ENcolor <- x[2,]
-PPcolor <- x[3,]
+PPcolor <- x[1,]
 
 ## abiotic factors
-x<-as.data.frame(inlmisc::GetColors(3, scheme = "high-contrast"))
-Lightcolor <- x[1,]
-Nutrientcolor <- x[2,]
-Watercolor <- x[3,]
+x<-as.data.frame(pals::brewer.paired(12))
+Lightcolor <- x[11,]
+Nutrientcolor <- x[12,]
+Watercolor <- x[10,]
 
 ## number of invaders
-x<-as.data.frame(inlmisc::GetColors(2, scheme = "vibrant"))
-Singlecolor <- x[1,]
-Multicolor <- x[2,]
+Singlecolor <- x[2,]
+Multicolor <- x[8,]
 
 ## type of ES
-x<-as.data.frame(inlmisc::GetColors(2, scheme = "muted"))
-ESNatcolor <- x[1,]
-ESInvcolor <- x[2,]
+ESNatcolor <- x[5,]
+ESInvcolor <- x[9,]
 ```
 
 # **Importing data**
@@ -107,6 +105,7 @@ InvEstimate <- read.csv(file.path(datain, "InvEstimateRESULTS.csv"))
 NatBioticEstimate <- read.csv(file.path(datain, "NatBioticEstimateRESULTS.csv"))
 NatAbioticEstimate <- read.csv(file.path(datain, "NatAbioticEstimateRESULTS.csv"))
 ```
+
 Column names are reported in the supplementary material
 ```{r importing the estimated data, include=TRUE}
 glimpse(data) # all data
@@ -167,6 +166,7 @@ invESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
 invESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
 ie[i]~dnorm(0,tauI[i])
 iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
+residuals[i]<-invESavemean.h[i]-invESavemean[i]
 }
 
 # priors
@@ -192,7 +192,7 @@ inits <- list(
 )
 
 # parameters
-parameters <- c("beta", "invESavemean.h", "tau", "var")
+parameters <- c("beta", "invESavemean.h", "tau", "var", "residuals")
 
 # running model
 es.simInvDiffStudy <- bugs(datamodel, inits, parameters, model.file = modelESInv, 
@@ -219,8 +219,15 @@ write.csv(x, file.path(parametersout, "ESInv-Mech.csv"), row.names = F)
 x
 ```
 
-+ Model fit:
++ Model residuals
+```{r residuals 1, include=FALSE}
+resInv<-as.data.frame(es.simInvDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
 
+write.csv(resInv, file.path(parametersout, "ESInv-MechRes.csv"), row.names = F)
+```
+
++ Model fit:
 ```{r echo=FALSE}
 x<-as.data.frame(es.simInvDiffStudy[["summary"]]) # retrieves model results
 invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
@@ -251,13 +258,14 @@ inv <- inv %>%
          !grepl("^ESIA", rowname),
          !grepl("^tau", rowname),
          !grepl("^var",rowname),
+         !grepl("^residuals",rowname),
          rowname != "deviance") %>%
   mutate(type = "invasive")
 
 forestinv <- inv %>%
   arrange(rowname) %>%
   mutate(test = str_sub(rowname, 6, 6)) %>% 
-  mutate_all(na_if,"") %>% 
+  # mutate_all(na_if,"") %>% 
   mutate(comparison2 = ifelse(is.na(test), "overall", 
                              ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
   arrange(comparison2) %>%
@@ -345,7 +353,7 @@ natESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
 natESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
 ie[i]~dnorm(0,tauI[i])
 iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
-
+residuals[i]<-natESavemean.h[i]-natESavemean[i]
 }
 
 # priors
@@ -371,7 +379,7 @@ inits <- list(
 )
 
 # parameters
-parameters <- c("beta", "natESavemean.h", "tau", "var")
+parameters <- c("beta", "natESavemean.h", "tau", "var", "residuals")
 
 # running model
 es.simNatDiffStudy <- bugs(datamodel, inits, parameters, model.file = modelESNat,
@@ -396,6 +404,14 @@ x<-as.data.frame(es.simNatDiffStudy[["summary"]]) %>% rownames_to_column(., var 
                                                    grepl("^var", rowname))
 write.csv(x, file.path(parametersout, "ESNat-Mech.csv"), row.names = F)
 x
+```
+
++ Model residuals
+```{r residuals 2, include=FALSE}
+resNat<-as.data.frame(es.simNatDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
+
+write.csv(resNat, file.path(parametersout, "resNat-MechRes.csv"), row.names = F)
 ```
 
 + Model fit
@@ -429,12 +445,13 @@ nat <- nat %>%
          !grepl("^ESIA", rowname),
          !grepl("^tau", rowname),
          !grepl("^var", rowname),
+         !grepl("^residuals",rowname),
          rowname != "deviance") %>%
   mutate(type = "native")
 forestnat <- nat %>%
   arrange(rowname) %>%
   mutate(test = str_sub(rowname, 6, 6)) %>% 
-  mutate_all(na_if,"") %>% 
+  # mutate_all(na_if,"") %>% 
   mutate(comparison2 = ifelse(is.na(test), "overall", 
                              ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
   arrange(comparison2) %>%
@@ -656,6 +673,7 @@ invESavemean.h[i]~dnorm(E[i],tau[Category[i]])
 natES[i]~dnorm(natESavemean[i],tauN[i])
 e[i]~dnorm(0,tauI[i])
 E[i]<-alpha[Category[i]]+beta[Category[i]]*natES[i]+iSRE[StudyID[i]]+e[i]
+residuals[i]<-invESavemean.h[i]-invESavemean[i]
 }
 
 # priors
@@ -691,7 +709,7 @@ invpred[m,j]<-alpha[m]+beta[m]*natpred[j]+studyRE+error[m]
 }# end model
 
 # parameters
-parameters <- c("alpha", "beta", "invESavemean.h", "invpred", "tau", "var")
+parameters <- c("alpha", "beta", "invESavemean.h", "invpred", "tau", "var", "residuals")
 
 # initials 
 inits <- list(
@@ -723,6 +741,14 @@ x<-as.data.frame(es.simAbioticPred[["summary"]]) %>% rownames_to_column(., var =
                                                      grepl("^alpha", rowname))
 write.csv(x, file.path(parametersout, "ESInv~resourceAvailability.csv"), row.names = F)
 x
+```
+
++ Model residuals
+```{r residuals 3, include=FALSE}
+resInvAbiotic<-as.data.frame(es.simAbioticPred[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
+
+write.csv(resInvAbiotic, file.path(parametersout, "ESInv~resourceAvailabilityRes.csv"), row.names = F)
 ```
 
 + Model fit
@@ -914,7 +940,7 @@ natESavemean.h[i]~dnorm(E[i],tau[Mechanism[i]])
 invES[i]~dnorm(invESavemean[i],tauI[i])
 e[i]~dnorm(0,tauN[i])
 E[i]<-beta[Mechanism[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
-
+residuals[i]<-natESavemean.h-natESavemean
 }
 
 # priors
@@ -952,7 +978,7 @@ natpred[m,j]<-beta[m]*invpred[j]+studyRE+error[m]
 }# end model
 
 # parameters
-parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var")
+parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var", "residuals")
 
 # initials
 inits <- list(
@@ -985,6 +1011,14 @@ write.csv(x, file.path(parametersout, "ESNat-impactMech.csv"), row.names = F)
 x
 ```
 
++ Model residuals
+```{r residuals 4, include=FALSE}
+resNatImpact<-as.data.frame(es.simBiotic[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
+
+write.csv(resNatImpact, file.path(parametersout, "ESNat-impactMechRes.csv"), row.names = F)
+```
+
 + Model fit
 
 ```{r echo=FALSE}
@@ -1009,7 +1043,7 @@ forest <- as.data.frame(es.simBiotic[["summary"]])
 forest <- forest %>% 
   select(mean, sd, `2.5%`, `97.5%`) %>% 
   rownames_to_column(., var = "rowname") %>% 
-  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname),!grepl("^var", rowname)) %>%
+  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname),!grepl("^var", rowname),!grepl("^residuals", rowname)) %>%
   arrange(rowname) %>%
   mutate(Mechanism = seq(1:3),
          type = "beta") %>%
@@ -1208,7 +1242,7 @@ natpred[m,j]<-beta[m]*invpred[j]+studyRE+error[m]
 }# end model
 
 # parameters
-parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var")
+parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var", "residuals")
 
 # initials
 inits <- list(
@@ -1241,6 +1275,14 @@ write.csv(x, file.path(parametersout, "ESNat~impactMultInv.csv"), row.names = F)
 x
 ```
 
++ Model residuals
+```{r residuals 5, include=FALSE}
+resNatMultInv<-as.data.frame(es.simBiotic2[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
+
+write.csv(resNatMultInv, file.path(parametersout, "ESNat~impactMultInvRes.csv"), row.names = F)
+```
+
 + Model fit
 
 ```{r echo=FALSE}
@@ -1266,7 +1308,7 @@ forest <- as.data.frame(es.simBiotic2[["summary"]])
 forest <- forest %>% 
   select(mean, sd, `2.5%`, `97.5%`) %>% 
   rownames_to_column(., var = "rowname") %>% 
-  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname), !grepl("^var", rowname)) %>%
+  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname), !grepl("^var", rowname), !grepl("^residuals", rowname)) %>%
   arrange(rowname) %>%
   mutate(comparison2 = paste0("multipleinvader", 1:0),
          type = "beta") %>%
@@ -1371,6 +1413,22 @@ patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') #
 
 ggsave(file.path(graph.wd,"ESNatInv_MultInvPredictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
 ```
+
+# **SM: Model residuals per covariates**
+```{r}
+resInv
+resNat
+resInvAbiotic
+resNatImpact
+resNatMultInv
+```
+
+## Ecoregions
+## Forest community
+## Forest type
+## Study type
+## Disturbance
+## Type of distubance
 
 # **SM: Invasive species and native community Performance per variables**
 ## Ecoregions
