@@ -83,13 +83,13 @@ PPcolor <- x[1,]
 
 ## abiotic factors
 x<-as.data.frame(pals::brewer.paired(12))
-Lightcolor <- x[11,]
+Lightcolor <- x[10,]
 Nutrientcolor <- x[12,]
-Watercolor <- x[10,]
+Watercolor <- x[6,]
 
 ## number of invaders
-Singlecolor <- x[2,]
-Multicolor <- x[8,]
+Singlecolor <- x[8,]
+Multicolor <- x[2,]
 
 ## type of ES
 ESNatcolor <- x[5,]
@@ -222,7 +222,9 @@ x
 + Model residuals
 ```{r residuals 1, include=FALSE}
 resInv<-as.data.frame(es.simInvDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
-  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(InvAllDataModel)
 
 write.csv(resInv, file.path(parametersout, "ESInv-MechRes.csv"), row.names = F)
 ```
@@ -409,9 +411,9 @@ x
 + Model residuals
 ```{r residuals 2, include=FALSE}
 resNat<-as.data.frame(es.simNatDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
-  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
-
-write.csv(resNat, file.path(parametersout, "resNat-MechRes.csv"), row.names = F)
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(BioticDataModel)
 ```
 
 + Model fit
@@ -746,9 +748,9 @@ x
 + Model residuals
 ```{r residuals 3, include=FALSE}
 resInvAbiotic<-as.data.frame(es.simAbioticPred[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
-  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
-
-write.csv(resInvAbiotic, file.path(parametersout, "ESInv~resourceAvailabilityRes.csv"), row.names = F)
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(AbioticDataModel)
 ```
 
 + Model fit
@@ -940,7 +942,7 @@ natESavemean.h[i]~dnorm(E[i],tau[Mechanism[i]])
 invES[i]~dnorm(invESavemean[i],tauI[i])
 e[i]~dnorm(0,tauN[i])
 E[i]<-beta[Mechanism[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
-residuals[i]<-natESavemean.h-natESavemean
+residuals[i]<-natESavemean.h[i]-natESavemean[i]
 }
 
 # priors
@@ -1014,9 +1016,9 @@ x
 + Model residuals
 ```{r residuals 4, include=FALSE}
 resNatImpact<-as.data.frame(es.simBiotic[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
-  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
-
-write.csv(resNatImpact, file.path(parametersout, "ESNat-impactMechRes.csv"), row.names = F)
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(BioticDataModel)
 ```
 
 + Model fit
@@ -1205,7 +1207,7 @@ natESavemean.h[i]~dnorm(E[i],tau[Category[i]]) #predicted
 invES[i]~dnorm(invESavemean[i],tauI[i])
 e[i]~dnorm(0,tauN[i])
 E[i]<-beta[Category[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
-
+residuals[i]<-natESavemean.h[i]-natESavemean[i]
 }
 
 # priors
@@ -1278,9 +1280,9 @@ x
 + Model residuals
 ```{r residuals 5, include=FALSE}
 resNatMultInv<-as.data.frame(es.simBiotic2[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
-  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname))
-
-write.csv(resNatMultInv, file.path(parametersout, "ESNat~impactMultInvRes.csv"), row.names = F)
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(BioticDataModel)
 ```
 
 + Model fit
@@ -1415,12 +1417,22 @@ ggsave(file.path(graph.wd,"ESNatInv_MultInvPredictions.png"), plot = last_plot()
 ```
 
 # **SM: Model residuals per covariates**
+
 ```{r}
-resInv
+resInv %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity))
+
 resNat
-resInvAbiotic
-resNatImpact
-resNatMultInv
+
+resInvAbiotic 
+
+resNatImpact 
+
+resNatMultInv 
 ```
 
 ## Ecoregions
