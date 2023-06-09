@@ -4249,7 +4249,7 @@ ggplot(data = world) + #plot the object as a map
 ggsave(file.path(graph.wd,paste(c("map", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")), dpi=300, scale=2, width=7, height=3.2) #saves the last generated plot
 ```
 
-# **SM: Funnel plots**
+# **SM: Funnel plots and Egger's regression test**
 ```{r include=FALSE}
 # Invasive performance
 glimpse(InvEstimate)
@@ -4278,6 +4278,7 @@ plot1<-ggplot(InvEstimateFP) +
       axis.line = element_line(colour = "black"),
       panel.border = element_blank())
 ```
+
 
 ```{r include=FALSE}
 # Native Performance
@@ -4356,4 +4357,22 @@ grid::grid.newpage()
 png(file.path(graph.wd, "FunnelPlots.png"),width=8, height=3, res=300,units="in")
 grid::grid.draw(rbind(cbind(p1,p2, p3))) # allow graphs to align right
 dev.off()
+```
+
+```{r}
+# Egger's regression test
+InvEstimateFP %>% 
+  mutate(y = ESInvmean/ESInvSD, x = Variance) %>% 
+  lm(y ~ x, data = .) %>% 
+  tidy(conf.int = TRUE) #funnel plot is asymmetrical, intercept is statistically significant
+
+NatBioticEstimateFP %>% 
+  mutate(y = ESNatmean/ESNatSD, x = Variance) %>% 
+  lm(y ~ x, data = .) %>% 
+  tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
+
+NatAbioticEstimateFP %>% 
+  mutate(y = ESNatmean/ESNatSD, x = Variance) %>% 
+  lm(y ~ x, data = .) %>% 
+  tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
 ```
