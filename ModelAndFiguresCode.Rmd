@@ -1417,30 +1417,375 @@ ggsave(file.path(graph.wd,"ESNatInv_MultInvPredictions.png"), plot = last_plot()
 ```
 
 # **SM: Model residuals per covariates**
-
+## Invasives
 ```{r}
-resInv %>% 
+resInv2<- resInv %>% 
   select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
          ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
-  mutate(ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
                                   ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
-         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity))
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Boreal Forests/Taiga","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Flooded Grasslands and Savannas","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Mediterranean Forests, Woodlands and Scrub","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","F",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","G",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","H",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Dry Broadleaf Forests","I",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Grasslands, Savannas and Shrublands","J",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","K",OlsonEtAl2001_GlobalEcoregions))))))))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="deciduous_floodplain_mixed","DD",
+                      ifelse(ForestCommunity=="dry","EE",
+                      ifelse(ForestCommunity=="evergreen","FF",
+                      ifelse(ForestCommunity=="floodplain","GG",
+                      ifelse(ForestCommunity=="mixed","HH",
+                      ifelse(ForestCommunity=="riparian","II",
+                      ifelse(ForestCommunity=="savanna","JJ",
+                      ifelse(ForestCommunity=="semi-deciduous","KK",
+                      ifelse(ForestCommunity=="semi-dry","LL",
+                      ifelse(ForestCommunity=="shrubland","MM",ForestCommunity))))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_primary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary","CCC",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","DDD",
+                   ifelse(TypeOfForest=="plantation","EEE",
+                   ifelse(TypeOfForest=="plantation_and_natural","FFF",
+                   ifelse(TypeOfForest=="restoration_planted","GGG",TypeOfForest)))))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
 
-resNat
+resInv2$variable <- factor(resInv2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
 
-resInvAbiotic 
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
 
-resNatImpact 
+resInv2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
 
-resNatMultInv 
+ggsave(file.path(graph.wd, "ResESInv.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
 ```
 
-## Ecoregions
-## Forest community
-## Forest type
-## Study type
-## Disturbance
-## Type of distubance
+## Natives
+```{r}
+resNat2 <- resNat %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","F",OlsonEtAl2001_GlobalEcoregions)))))),
+ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="deciduous_floodplain_mixed","DD",
+                      ifelse(ForestCommunity=="dry","EE",
+                      ifelse(ForestCommunity=="evergreen","FF",
+                      ifelse(ForestCommunity=="floodplain","GG",
+                      ifelse(ForestCommunity=="mixed","HH",
+                      ifelse(ForestCommunity=="riparian","II",
+                      ifelse(ForestCommunity=="savanna","JJ",
+                      ifelse(ForestCommunity=="semi-deciduous","KK",
+                      ifelse(ForestCommunity=="semi-dry","LL",
+                      ifelse(ForestCommunity=="shrubland","MM","NN"))))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_secondary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD","EEE"))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resNat2$variable <- factor(resNat2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resNat2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResESNat.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Abiotic
+```{r}
+resInvAbiotic2 <- resInvAbiotic %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Boreal Forests/Taiga","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Flooded Grasslands and Savannas","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Mediterranean Forests, Woodlands and Scrub","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","F",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","G",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Grasslands, Savannas and Shrublands","H",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","I",OlsonEtAl2001_GlobalEcoregions))))))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="deciduous_floodplain_mixed","DD",
+                      ifelse(ForestCommunity=="dry","EE",
+                      ifelse(ForestCommunity=="evergreen","FF",
+                      ifelse(ForestCommunity=="floodplain","GG",
+                      ifelse(ForestCommunity=="mixed","HH",
+                      ifelse(ForestCommunity=="riparian","II",
+                      ifelse(ForestCommunity=="savanna","JJ",
+                      ifelse(ForestCommunity=="semi-deciduous","KK",ForestCommunity))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_primary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD",TypeOfForest))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resInvAbiotic2$variable <- factor(resInvAbiotic2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resInvAbiotic2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResESAbiotic.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Invasive impact on native community
+```{r}
+resNatImpact2 <- resNatImpact %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","F",OlsonEtAl2001_GlobalEcoregions)))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="dry","DD",
+                      ifelse(ForestCommunity=="evergreen","EE",
+                      ifelse(ForestCommunity=="floodplain","FF",
+                      ifelse(ForestCommunity=="mixed","GG",
+                      ifelse(ForestCommunity=="riparian","HH",
+                      ifelse(ForestCommunity=="savanna","II",
+                      ifelse(ForestCommunity=="semi-deciduous","JJ",
+                      ifelse(ForestCommunity=="shrubland","KK","LL"))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_secondary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD","EEE"))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resNatImpact2$variable <- factor(resNatImpact2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resNatImpact2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResInvImpactNat.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Impact of the number of invasives on native community
+```{r}
+resNatMultInv2 <- resNatMultInv %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","F",OlsonEtAl2001_GlobalEcoregions)))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="dry","DD",
+                      ifelse(ForestCommunity=="evergreen","EE",
+                      ifelse(ForestCommunity=="floodplain","FF",
+                      ifelse(ForestCommunity=="mixed","GG",
+                      ifelse(ForestCommunity=="riparian","HH",
+                      ifelse(ForestCommunity=="savanna","II",
+                      ifelse(ForestCommunity=="semi-deciduous","JJ",
+                      ifelse(ForestCommunity=="shrubland","KK","LL"))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_secondary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD","EEE"))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resNatMultInv2$variable <- factor(resNatMultInv2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resNatMultInv2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResInvNoImpactNat.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
 
 # **SM: Invasive species and native community Performance per variables**
 ## Ecoregions
