@@ -4381,3 +4381,259 @@ NatAbioticEstimateFP %>%
   lm(y ~ x, data = .) %>% 
   broom::tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
 ```
+
+# **SM: ES vs. climatic variables**
+```{r model abiotic, include=FALSE}
+# organizing the data
+J <- nrow(AbioticDataModel)
+StudyID <- AbioticDataModel$StudyID # model with study random effects
+Mechanism <- AbioticDataModel$Mechanism
+natESavemean <- AbioticDataModel$ESNatmean
+natESavesd <- AbioticDataModel$ESNatSD
+M <- max(AbioticDataModel$ESNatSD, na.rm = T) 
+K <- length(unique(AbioticDataModel$Mechanism))
+R <- K+1 
+W <- length(unique(AbioticDataModel$StudyID))# model with study random effects
+datamodel <- list (J=J, StudyID=StudyID, Mechanism=Mechanism, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+
+# model abiotic
+#model
+modelESNatAbiotic <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+natESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
+}
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+for(i in 1:W){ # StudyRE
+iSRE[i]~dnorm(0,tau[R])
+}
+  for(i in 1:R){ # change to K if model only error term; or R for model error + studyRE
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+} # end model
+# # initials - model error + studyRE
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+#parameters
+parameters <- c("beta", "natESavemean.h", "tau")
+# parameters <- c("beta", "tau") #simpler. Takes less time to run the model, but I can plot afterwards. I need to rerun the model.
+#running model
+es.simNatAbiotic <- bugs(datamodel, inits, parameters, model.file = modelESNatAbiotic, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+#DIC value - reasonable value.
+es.simNatAbiotic[["DIC"]] 
+#trace plots - betas converge really well, but they are not actually different
+traplot(es.simNatAbiotic, "beta")
+
+#getting results
+x<-as.data.frame(es.simNatAbiotic[["summary"]]) #this contains the mean, sd and CI intervals of each of the parameters defined above
+### Model Fit ###
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) ## predictions vs. estimated values
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+# summary(m1) ##R2 is the model fit
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r echo=FALSE}
+# data prep
+temp_climatic <- data %>% 
+  select(Elevation_m, Precipitation_mm, JanuaryTemp_C, JulyTemp_C, MeanAnnualTemp_C,YearOfDataMeasurement, ObsIDOriginal)
+
+## Invasive ES
+inv <- as.data.frame(es.simInvDiffStudy[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^invESavemean.h", rowname)) %>%
+  rename(ESInvmean = mean,
+         ESInvSD = sd,
+         InvCI2.5 = `2.5%`,
+         InvCI97.5 = `97.5%`) %>%
+  mutate(ObsID = row_number()) 
+
+temp <- InvAllDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, MultipleInvader, Mechanism, ESInvmean, ESInvSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID) %>% 
+  left_join(inv, by = "ObsID")
+
+temp <- temp %>% select(ESInvmean, ObsIDOriginal) %>% 
+  left_join(temp_climatic, by = "ObsIDOriginal") %>%
+  #substitutes "several_locations" for NA no matter the column it is in
+  mutate_all(function(x) gsub("several_locations", NA, x)) %>%
+  mutate(YearOfDataMeasurement = ifelse(grepl("^~", YearOfDataMeasurement), "1945", YearOfDataMeasurement)) %>%
+  separate(Elevation_m, c("ElevMin", "ElevMax"), sep = "([-])",
+         extra = "merge") %>%
+  separate(Precipitation_mm, c("PrecipMin", "PrecipMax"), sep = "([;-])",
+         extra = "merge")%>%
+  separate(JanuaryTemp_C, c("JanMin", "JanMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(JulyTemp_C, c("JulMin", "JulMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(MeanAnnualTemp_C, c("AnnualMin", "AnnualMax"), sep = "([;])",
+         extra = "merge") %>%
+  separate(YearOfDataMeasurement, c("YearMin", "YearMax"), sep = "([;-])",
+         extra = "merge") %>%
+  separate(YearMin, c("YearMin", "Year2Max"), sep = "\\s",
+         extra = "merge") %>%
+  #mutate all columns removing any extra spaces
+  mutate_all(function(x) str_trim(x)) %>%
+  select(-ends_with("Max")) %>%
+  #pivot_longer(!c(ESinv, ESnat, ObsIDOriginal), names_to = "variable", values_to = "value") %>%
+  type_convert() 
+
+tempcor<-as.data.frame(cor(temp, use="pairwise.complete.obs"))
+tempcor<-tempcor %>% rownames_to_column(., var = "rowname") %>% filter(rowname=="ESInvmean")
+
+## Native community ES
+nat <- as.data.frame(es.simNatDiffStudy[["summary"]])
+
+nat <- nat %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>% 
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(BioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+
+temp2 <- nat %>% select(ESNatmean, ObsIDOriginal) %>% 
+  left_join(temp_climatic, by = "ObsIDOriginal") %>%
+  #substitutes "several_locations" for NA no matter the column it is in
+  mutate_all(function(x) gsub("several_locations", NA, x)) %>%
+  mutate(YearOfDataMeasurement = ifelse(grepl("^~", YearOfDataMeasurement), "1945", YearOfDataMeasurement)) %>%
+  separate(Elevation_m, c("ElevMin", "ElevMax"), sep = "([-])",
+         extra = "merge") %>%
+  separate(Precipitation_mm, c("PrecipMin", "PrecipMax"), sep = "([;-])",
+         extra = "merge")%>%
+  separate(JanuaryTemp_C, c("JanMin", "JanMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(JulyTemp_C, c("JulMin", "JulMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(MeanAnnualTemp_C, c("AnnualMin", "AnnualMax"), sep = "([;])",
+         extra = "merge") %>%
+  separate(YearOfDataMeasurement, c("YearMin", "YearMax"), sep = "([;-])",
+         extra = "merge") %>%
+  separate(YearMin, c("YearMin", "Year2Max"), sep = "\\s",
+         extra = "merge") %>%
+  #mutate all columns removing any extra spaces
+  mutate_all(function(x) str_trim(x)) %>%
+  select(-ends_with("Max")) %>%
+  #pivot_longer(!c(ESinv, ESnat, ObsIDOriginal), names_to = "variable", values_to = "value") %>%
+  type_convert()
+
+temp2cor<-as.data.frame(cor(temp2, use="pairwise.complete.obs"))
+temp2cor<-temp2cor %>% rownames_to_column(., var = "rowname") %>% filter(rowname=="ESNatmean")
+
+## Abiotic ES
+natabiotic <- as.data.frame(es.simNatAbiotic[["summary"]])
+
+natabiotic <- natabiotic %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>%
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(AbioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+temp3 <- natabiotic %>% select(ESNatmean, ObsIDOriginal) %>% 
+  left_join(temp_climatic, by = "ObsIDOriginal") %>%
+  #substitutes "several_locations" for NA no matter the column it is in
+  mutate_all(function(x) gsub("several_locations", NA, x)) %>%
+  mutate(YearOfDataMeasurement = ifelse(grepl("^~", YearOfDataMeasurement), "1945", YearOfDataMeasurement)) %>%
+  separate(Elevation_m, c("ElevMin", "ElevMax"), sep = "([-])",
+         extra = "merge") %>%
+  separate(Precipitation_mm, c("PrecipMin", "PrecipMax"), sep = "([;-])",
+         extra = "merge")%>%
+  separate(JanuaryTemp_C, c("JanMin", "JanMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(JulyTemp_C, c("JulMin", "JulMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(MeanAnnualTemp_C, c("AnnualMin", "AnnualMax"), sep = "([;])",
+         extra = "merge") %>%
+  separate(YearOfDataMeasurement, c("YearMin", "YearMax"), sep = "([;-])",
+         extra = "merge") %>%
+  separate(YearMin, c("YearMin", "Year2Max"), sep = "\\s",
+         extra = "merge") %>%
+  #mutate all columns removing any extra spaces
+  mutate_all(function(x) str_trim(x)) %>%
+  select(-ends_with("Max")) %>%
+  #pivot_longer(!c(ESinv, ESnat, ObsIDOriginal), names_to = "variable", values_to = "value") %>%
+  type_convert()
+
+temp3cor<-as.data.frame(cor(temp3, use="pairwise.complete.obs"))
+temp3cor<-temp3cor %>% rownames_to_column(., var = "rowname") %>% filter(rowname=="ESNatmean")
+```
+
+## Invasive ES
+```{r echo=FALSE}
+### observed data
+require(gridExtra)
+p1<-ggplot(temp, aes(x = ElevMin, y = ESInvmean)) + geom_point() + xlab("Elevation (m)") + ylab("Invasive Effect Size") + annotate("text",x=1500, y=1.7, label=paste0("cor = ",round(tempcor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank()) #+ geom_smooth(method='lm')
+# weird point obs #11
+p2<-ggplot(temp, aes(x = PrecipMin, y = ESInvmean)) + geom_point() + xlab("Annual precipitation (mm)") + theme(axis.title.y=element_blank())+ annotate("text",x=3000, y=1.7, label=paste0("cor = ",round(tempcor$PrecipMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+p3<-ggplot(temp, aes(x = JanMin, y = ESInvmean)) + geom_point() + xlab("Average January temperature (°C)")+ ylab("Invasive Effect Size")+ annotate("text",x=32, y=1.7, label=paste0("cor = ",round(tempcor$JanMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+p4<-ggplot(temp, aes(x = JulMin, y = ESInvmean)) + geom_point() + xlab("Average July temperature (°C)")+ theme(axis.title.y=element_blank())+ annotate("text",x=5, y=1.7, label=paste0("cor = ",round(tempcor$JulMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+# weird point obs #50
+p5<-ggplot(temp, aes(x = AnnualMin, y = ESInvmean)) + geom_point() + xlab("Average Annual temperature (°C)")+ ylab("Invasive Effect Size")+ annotate("text",x=5, y=1.7, label=paste0("cor = ",round(tempcor$AnnualMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+# two obs that are older than the others
+p6<-ggplot(temp, aes(x = YearMin, y = ESInvmean)) + geom_point() + xlab("Year of data collection") + theme(axis.title.y=element_blank())+ annotate("text",x=1960, y=1.7, label=paste0("cor = ",round(tempcor$YearMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+
+# saving
+png(file.path(graph.wd,paste(c("exploratory_ESInv_ClimaticVar", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")),width=8, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
+dev.off()
+```
+
+## Native ES
+```{r echo=FALSE}
+##### estimated data
+p1<-ggplot(temp2, aes(x = ElevMin, y = ESNatmean)) + geom_point() + xlab("Elevation (m)") + ylab("Native Community Effect Size") + annotate("text",x=1250, y=0.7, label=paste0("cor = ",round(temp2cor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# + geom_smooth(method='lm')
+p2<-ggplot(temp2, aes(x = PrecipMin, y = ESNatmean)) + geom_point() + xlab("Annual precipitation (mm)") + theme(axis.title.y=element_blank())+ annotate("text",x=3000, y=0.7, label=paste0("cor = ",round(temp2cor$PrecipMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p3<-ggplot(temp2, aes(x = JanMin, y = ESNatmean)) + geom_point() + xlab("Average January temperature (°C)")+ ylab("Native Community Effect Size")+ annotate("text",x=30, y=0.7, label=paste0("cor = ",round(temp2cor$JanMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p4<-ggplot(temp2, aes(x = JulMin, y = ESNatmean)) + geom_point() + xlab("Average July temperature (°C)")+ theme(axis.title.y=element_blank())+ annotate("text",x=15, y=0.7, label=paste0("cor = ",round(temp2cor$JulMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p5<-ggplot(temp2, aes(x = AnnualMin, y = ESNatmean)) + geom_point() + xlab("Average Annual temperature (°C)")+ ylab("Native Community Effect Size")+ annotate("text",x=20, y=0.7, label=paste0("cor = ",round(temp2cor$AnnualMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# two obs that are older than the others
+p6<-ggplot(temp2, aes(x = YearMin, y = ESNatmean)) + geom_point() + xlab("Year of data collection") + theme(axis.title.y=element_blank())+ annotate("text",x=1980, y=0.7, label=paste0("cor = ",round(temp2cor$YearMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+
+# saving
+png(file.path(graph.wd,paste(c("exploratory_ESNatBiotic_ClimaticVar", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")),width=8, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
+dev.off()
+```
+
+#### Abiotic ES
+```{r echo=FALSE}
+##### estimated data
+p1<-ggplot(temp3, aes(x = ElevMin, y = ESNatmean)) + geom_point() + xlab("Elevation (m)")+ ylab("Abiotic Effect Size") + annotate("text",x=1500, y=-1, label=paste0("cor = ",round(temp3cor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# + geom_smooth(method='lm')
+p2<-ggplot(temp3, aes(x = PrecipMin, y = ESNatmean)) + geom_point() + xlab("Annual precipitation (mm)") + theme(axis.title.y=element_blank()) + annotate("text",x=3500, y=-1, label=paste0("cor = ",round(temp3cor$PrecipMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p3<-ggplot(temp3, aes(x = JanMin, y = ESNatmean)) + geom_point() + xlab("Average January temperature (°C)") + ylab("Abiotic Effect Size") + annotate("text",x=20, y=-1, label=paste0("cor = ",round(temp3cor$JanMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p4<-ggplot(temp3, aes(x = JulMin, y = ESNatmean)) + geom_point() + xlab("Average July temperature (°C)")+ theme(axis.title.y=element_blank()) + annotate("text",x=7, y=-1, label=paste0("cor = ",round(temp3cor$JulMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p5<-ggplot(temp3, aes(x = AnnualMin, y = ESNatmean)) + geom_point() + xlab("Average Annual temperature (°C)") + ylab("Abiotic Effect Size") + annotate("text",x=23, y=-1, label=paste0("cor = ",round(temp3cor$AnnualMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# two obs that are older than the others
+p6<-ggplot(temp3, aes(x = YearMin, y = ESNatmean)) + geom_point() + xlab("Year of data collection") + theme(axis.title.y=element_blank()) + annotate("text",x=1995, y=-1, label=paste0("cor = ",round(temp3cor$YearMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# saving
+png(file.path(graph.wd,paste(c("exploratory_ESNatAbiotic_ClimaticVar", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")),width=8, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
+dev.off()
+```
