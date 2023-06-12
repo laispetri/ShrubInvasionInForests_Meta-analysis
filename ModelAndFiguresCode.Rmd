@@ -1162,7 +1162,7 @@ patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') #
 ggsave(file.path(graph.wd,"ESNatInv_Predictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
 ```
 
-# **Q4: Is the native community more impacted by one of multiple invaders?**
+# **Q3: Is the native community more impacted by one of multiple invaders?**
 ### organizing model data
 ```{r}
 #observations per mechanism
