@@ -35,6 +35,7 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ## linked to many functions
 require(tidyverse)
 require(readxl)
+require(broom)
 
 ## basic ones necessary for map
 require(sf)
@@ -92,8 +93,9 @@ Singlecolor <- x[8,]
 Multicolor <- x[2,]
 
 ## type of ES
-ESNatcolor <- x[5,]
-ESInvcolor <- x[9,]
+x<-as.data.frame(pals::brewer.set3(10))
+ESNatcolor <- x[4,]
+ESInvcolor <- x[10,]
 ```
 
 # **Importing data**
@@ -267,7 +269,6 @@ inv <- inv %>%
 forestinv <- inv %>%
   arrange(rowname) %>%
   mutate(test = str_sub(rowname, 6, 6)) %>% 
-  # mutate_all(na_if,"") %>% 
   mutate(comparison2 = ifelse(is.na(test), "overall", 
                              ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
   arrange(comparison2) %>%
@@ -453,7 +454,6 @@ nat <- nat %>%
 forestnat <- nat %>%
   arrange(rowname) %>%
   mutate(test = str_sub(rowname, 6, 6)) %>% 
-  # mutate_all(na_if,"") %>% 
   mutate(comparison2 = ifelse(is.na(test), "overall", 
                              ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
   arrange(comparison2) %>%
@@ -1909,7 +1909,6 @@ forest2inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2036,7 +2035,6 @@ forest2nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2207,7 +2205,6 @@ forest3inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2336,7 +2333,6 @@ forest3nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2506,7 +2502,6 @@ forest4inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2634,7 +2629,6 @@ forest4nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2803,7 +2797,6 @@ forest1inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2931,7 +2924,6 @@ forest1nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3090,7 +3082,6 @@ forest5inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3217,7 +3208,6 @@ forest5nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3377,7 +3367,6 @@ forest6inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3504,7 +3493,6 @@ forest6nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3809,7 +3797,6 @@ forestinv <- inv %>%
   mutate(Disturbance=as.numeric(Disturbance),
          Mechanism=as.numeric(Mechanism),
          Type=as.numeric(Type)) %>% 
-  mutate_all(na_if,"") %>% 
   left_join(samplesize) %>% 
   filter(!is.na(index)) %>% 
   rbind(ESInvEXCLUDED) %>% 
@@ -4066,7 +4053,6 @@ forestnat <- nat %>%
   mutate(Disturbance=as.numeric(Disturbance),
          Mechanism=as.numeric(Mechanism),
          Type=as.numeric(Type)) %>% 
-  mutate_all(na_if,"") %>% 
   left_join(samplesize) %>% 
   filter(!is.na(index)) %>% 
   rbind(ESNatEXCLUDED) %>% 
@@ -4080,7 +4066,8 @@ PPnat <- forestnat %>% filter(Mechanism==1) %>% mutate(category="nat")
 
 PPinv <- forestinv %>% filter(Mechanism==1) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
 
-PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% mutate(rowname=ifelse(is.na(rowname),row_number(),rowname),
+PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% 
+  mutate(rowname=ifelse(is.na(rowname),row_number(),rowname),
                                                     category=ifelse(rowname=="10","nat",
                                                             ifelse(rowname=="11","inv",
                                                             ifelse(rowname=="12","nat",
@@ -4089,7 +4076,13 @@ PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% mutate(rowname=ifelse(is.na(rowname
                                                             ifelse(rowname=="11","beta[1,1,3]",
                                                             ifelse(rowname=="12","beta[1,1,3]",
                                                             ifelse(rowname=="13","beta[1,1,4]",rowname))))) %>%
-  group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[1,2]", index-1,ifelse(rowname=="BB[1,1]", index+1,index))) %>% arrange(index)
+  group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[1,2]", index-1,ifelse(rowname=="BB[1,1]", index+1,index))) %>% 
+  mutate(index=ifelse(rowname=="BB[1,2]", index+100,
+                      ifelse(rowname=="BB[1,1]", index+100,
+                      ifelse(index==3, 1, 
+                             ifelse(index==3.2, 1.2, index)))),
+         index=ifelse(rowname=="BB[1,2]", index-99,
+                      ifelse(rowname=="BB[1,1]", index-99,index))) %>% arrange(index)
 
  p1<-
   ggplot(data=PP, 
@@ -4130,7 +4123,13 @@ BRnat <- forestnat %>% filter(Mechanism==3) %>% mutate(category="nat")
 
 BRinv <- forestinv %>% filter(Mechanism==3) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
 
-BR <- BRnat %>% rbind(BRinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[3,2]", index-1,ifelse(rowname=="BB[3,1]", index+1,index))) %>% arrange(index)
+BR <- BRnat %>% rbind(BRinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[3,2]", index-1,ifelse(rowname=="BB[3,1]", index+1,index))) %>% 
+  mutate(index=ifelse(rowname=="BB[3,2]", index+100,
+                      ifelse(rowname=="BB[3,1]", index+100,
+                      ifelse(index==3, 1, 
+                             ifelse(index==3.2, 1.2, index)))),
+         index=ifelse(rowname=="BB[3,2]", index-99,
+                      ifelse(rowname=="BB[3,1]", index-99,index))) %>% arrange(index)
 
 p2<-
   ggplot(data=BR, 
@@ -4170,7 +4169,13 @@ ENnat <- forestnat %>% filter(Mechanism==2) %>% mutate(category="nat")
 
 ENinv <- forestinv %>% filter(Mechanism==2) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
 
-EN <- ENnat %>% rbind(ENinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[2,2]", index-1,ifelse(rowname=="BB[2,1]", index+1,index))) %>% arrange(index)
+EN <- ENnat %>% rbind(ENinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[2,2]", index-1,ifelse(rowname=="BB[2,1]", index+1,index))) %>% 
+  mutate(index=ifelse(rowname=="BB[2,2]", index+100,
+                      ifelse(rowname=="BB[2,1]", index+100,
+                      ifelse(index==3, 1, 
+                             ifelse(index==3.2, 1.2, index)))),
+         index=ifelse(rowname=="BB[2,2]", index-99,
+                      ifelse(rowname=="BB[2,1]", index-99,index))) %>% arrange(index)
 
  p3<-
   ggplot(data=EN, 
@@ -4359,20 +4364,20 @@ grid::grid.draw(rbind(cbind(p1,p2, p3))) # allow graphs to align right
 dev.off()
 ```
 
++ Egger's regression test
 ```{r}
-# Egger's regression test
 InvEstimateFP %>% 
   mutate(y = ESInvmean/ESInvSD, x = Variance) %>% 
   lm(y ~ x, data = .) %>% 
-  tidy(conf.int = TRUE) #funnel plot is asymmetrical, intercept is statistically significant
+  broom::tidy(conf.int = TRUE) #funnel plot is asymmetrical, intercept is statistically significant
 
 NatBioticEstimateFP %>% 
   mutate(y = ESNatmean/ESNatSD, x = Variance) %>% 
   lm(y ~ x, data = .) %>% 
-  tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
+  broom::tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
 
 NatAbioticEstimateFP %>% 
   mutate(y = ESNatmean/ESNatSD, x = Variance) %>% 
   lm(y ~ x, data = .) %>% 
-  tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
+  broom::tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
 ```
