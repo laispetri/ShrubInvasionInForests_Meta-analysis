@@ -791,7 +791,7 @@ forest <- forest %>%
 xname <- "Slope (mean+95%CI)"
 
 #forest plot of slope
-ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
+p4<-ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
    geom_errorbarh(data=forest, height=.1, size=1,aes(color=Abiotic_CATEGORY)) +
   geom_point(data = forest, size=5, color=c(Lightcolor,Nutrientcolor,Watercolor),shape=c(21,24,22),fill="white",stroke=1)+
  
@@ -800,27 +800,23 @@ scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels = c(
   scale_color_manual(values=c(Lightcolor,Nutrientcolor,Watercolor)) +
 geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
 theme_bw()+
-  labs(y=NULL)+
   coord_cartesian(ylim = c(3,1), xlim=c(-.5, .5), clip = "off")+
 theme(text=element_text(size=22, color="black"),
       panel.spacing = unit(1, "lines"),
       panel.grid = element_blank(),
       legend.position = "none",
-      axis.title.x = element_text(size = 18, color="black"),
+      axis.title.x = element_text(size = 20, color="black"),
       plot.margin = margin(1,1,1,10),
       panel.background = element_rect(fill='transparent', color=NA),
       plot.background = element_rect(fill='transparent', color=NA),
       axis.text.y=element_blank(),  #remove y axis labels
       axis.ticks.y=element_blank(),
-      axis.title.y=element_blank(),
+      axis.title.y=element_text(size = 12, color="white"),
       axis.text.x = element_text(size=19),
       axis.line = element_line(colour = "black"),
       panel.border = element_blank())+ 
   geom_text_repel(aes(label = n),direction="both",color=c(Lightcolor,Nutrientcolor,Watercolor),size=6, point.size=12,segment.colour = NA)+
-   annotate("text", x=-0.5, y=0.95, label="(b)", color="black", fontface = "bold", size=6)
-
-# saves
-ggsave(file.path(graph.wd,"ESInvAbiotic_PredSlope.png"), plot = last_plot(), width=5, height=6, dpi = 300, units="in")
+   annotate("text", x=-0.49, y=0.95, label="(d)", color="black", fontface = "bold", size=6)
 ```
 
 ```{r model1: ESInv~ESNat EN data prep, include=FALSE}
@@ -839,53 +835,147 @@ ESInvPred <- ESInvPred %>%
          CI975 = `97.5%`)
 ```
 
-```{r model1: ESInv~ESNat EN plot, include=FALSE}
+```{r model1: ESInv~ESNat EN plot [LIGHT], include=FALSE}
 # plotting real data in the background and the prediction lines on top
-  ggplot(ESInvPred, aes(ESNatPred)) +
+AbioticDataModelLight <- AbioticDataModel  %>% filter(AbioticID==1)
+p1<-
+  ESInvPred %>% 
+  filter(AbioticID==1) %>% 
+ggplot(aes(ESNatPred)) +
   geom_hline(yintercept=0, linetype="dashed",
              color = "gray", size=1.5) +
   geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
-  geom_point(data = AbioticDataModel, aes(ESNatmean, ESInvmean, 
+  geom_point(data = AbioticDataModelLight, aes(ESNatmean, ESInvmean, 
                                      color = as.factor(Abiotic_CATEGORY),
                                      group = as.factor(Abiotic_CATEGORY),
-                                     shape = as.factor(Abiotic_CATEGORY)),size=3,alpha=0.8) +
+                                     shape = as.factor(Abiotic_CATEGORY)),size=5,alpha=0.7) +
   theme_bw()+
   scale_x_continuous(expand = c(0,0)) +
   coord_cartesian(ylim = c(-0.2, 2.1), 
                   xlim=c(-2,2), 
                   clip = "off")+
   geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
-  scale_color_manual(values=c(Lightcolor,Nutrientcolor,Watercolor),
-                     labels=c("Light","Soil nutrient","Soil water")) +
-  scale_fill_manual(values=c(Lightcolor,Nutrientcolor,Watercolor), 
-                    labels=c("Light","Soil nutrient","Soil water")) +
-  scale_shape_manual(values=c(16,17,15),labels=c("Light","Soil nutrient","Soil water")) +
-  xlab("Abiotic Effect Size") +
-  ylab("Invasive Effect Size (mean+95%PI)\n\n") +
+  scale_color_manual(values=c(Lightcolor),
+                     labels=c("Light")) +
+  scale_fill_manual(values=c(Lightcolor), 
+                    labels=c("Light")) +
+  scale_shape_manual(values=c(16),labels=c("Light")) +
+  xlab(" ") +
+  ylab("Invasive Effect Size (mean+95%PI)\n") +
   theme(text=element_text(size=20, color="black"),
-        legend.position="bottom",
-        legend.margin=margin(t=-10), # removes space between graph and legend
-        legend.title = element_blank(),
-        panel.grid = element_blank(),
-        legend.text = element_text(size = 17),
-        legend.key.size = unit(0.4, "cm"),
+        legend.position="none",
+         panel.grid = element_blank(),
       plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
       axis.line = element_line(colour = "black"),
       axis.text.y = element_text(size=19),
+      axis.title.y = element_text(color="white"),
+      axis.text.x = element_text(size=19,color="white"),
+      panel.border = element_blank())+
+  annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=-1.6, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
+  annotate("text", x=1.6, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
+  annotate("segment", y=0.05, yend=1.95, x=-2.65, xend=-2.65, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0, x=-2.83, label="lower", color="black", fontface = "italic",angle=90, size=5) +
+  annotate("text", y=1.95, x=-2.83, label="higher", color="black", fontface = "italic", angle=90, size=5)+
+  annotate("text", y=1, x=-2.83, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
+   annotate("text", x=-1.35, y=2.15, label="(a) Light", color="black", fontface = "bold", size=6)
+```
+
+```{r model1: ESInv~ESNat EN plot [SOIL NUTRIENT], include=FALSE}
+# plotting real data in the background and the prediction lines on top
+AbioticDataModelSoil <- AbioticDataModel  %>% filter(AbioticID==2)
+p2<-ESInvPred %>% 
+  filter(AbioticID==2) %>% 
+  ggplot(aes(ESNatPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
+  geom_point(data = AbioticDataModelSoil, aes(ESNatmean, ESInvmean, 
+                                     color = as.factor(Abiotic_CATEGORY),
+                                     group = as.factor(Abiotic_CATEGORY),
+                                     shape = as.factor(Abiotic_CATEGORY)),size=5,alpha=0.7) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-0.2, 2.1), 
+                  xlim=c(-2,2), 
+                  clip = "off")+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
+  scale_color_manual(values=c(Nutrientcolor),
+                     labels=c("Soil nutrient")) +
+  scale_fill_manual(values=c(Nutrientcolor), 
+                    labels=c("Soil nutrient")) +
+  scale_shape_manual(values=c(17),labels=c("Soil nutrient")) +
+  xlab("Abiotic Effect Size") +
+  theme(text=element_text(size=20, color="black"),
+        legend.position="none",
+        panel.grid = element_blank(),
+      plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
+      axis.line = element_line(colour = "black"),
+      axis.text.y = element_blank(),
+      axis.text.x = element_text(size=19),
+      axis.title.y = element_text(size=19,color="white"),
+      panel.border = element_blank())+
+  annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=-1.7, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
+  annotate("text", x=1.7, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
+  annotate("text", x=-1.05, y=2.15, label="(b) Soil nutrient", color="black", fontface = "bold", size=6)
+```
+
+```{r model1: ESInv~ESNat EN plot [SOIL WATER], include=FALSE}
+# plotting real data in the background and the prediction lines on top
+AbioticDataModelWater <- AbioticDataModel %>% filter(AbioticID==3)
+p3<-ESInvPred %>% 
+  filter(AbioticID==3) %>% 
+ggplot(aes(ESNatPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
+  geom_point(data = AbioticDataModelWater, aes(ESNatmean, ESInvmean, 
+                                     color = as.factor(Abiotic_CATEGORY),
+                                     group = as.factor(Abiotic_CATEGORY),
+                                     shape = as.factor(Abiotic_CATEGORY)),size=5,alpha=0.7) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-0.2, 2.1), 
+                  xlim=c(-2,2), 
+                  clip = "off")+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
+  scale_color_manual(values=c(Watercolor),
+                     labels=c("Soil water")) +
+  scale_fill_manual(values=c(Watercolor), 
+                    labels=c("Soil water")) +
+  scale_shape_manual(values=c(15),labels=c("Soil water")) +
+  xlab("Abiotic Effect Size") +
+  ylab("Invasive Effect Size (mean+95%PI)\n") +
+  theme(text=element_text(size=20, color="black"),
+        legend.position="none",
+        panel.grid = element_blank(),
+       plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
+      axis.line = element_line(colour = "black"),
+      axis.text.y = element_text(size=19),
+      axis.title.y = element_text(hjust=-4),
       axis.text.x = element_text(size=19),
       panel.border = element_blank())+
   annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
-  annotate("text", x=-1.8, y=-0.15, label="lower", color="black", fontface = "italic",size=6) +
-  annotate("text", x=1.8, y=-0.15, label="higher", color="black", fontface = "italic",size=6)+
-  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=6) +
-  annotate("segment", y=0.05, yend=1.95, x=-2.35, xend=-2.35, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
-  annotate("text", y=0.05, x=-2.52, label="lower", color="black", fontface = "italic",angle=90, size=6) +
-  annotate("text", y=1.95, x=-2.52, label="higher", color="black", fontface = "italic", angle=90, size=6)+
-  annotate("text", y=1, x=-2.52, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=6)+
-   annotate("text", x=-1.87, y=2.15, label="(a)", color="black", fontface = "bold", size=6)
+  annotate("text", x=-1.6, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
+  annotate("text", x=1.6, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
+  annotate("segment", y=0.05, yend=1.95, x=-2.65, xend=-2.65, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0, x=-2.83, label="lower", color="black", fontface = "italic",angle=90, size=5) +
+  annotate("text", y=1.95, x=-2.83, label="higher", color="black", fontface = "italic", angle=90, size=5)+
+  annotate("text", y=1, x=-2.83, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
+   annotate("text", x=-1, y=2.15, label="(c) Soil water", color="black", fontface = "bold", size=6)
+```
 
-# saves
-ggsave(file.path(graph.wd,"ESInvAbiotic_Pred.png"), plot = last_plot(), width=8, height=6, dpi = 300, units="in")
+```{r echo=FALSE}
+grid.arrange(p1,p2,p3,p4,nrow=2, ncol=2)
+
+#saves
+png(file.path(graph.wd,"ESInvAbiotic_Pred_NEW.png"),width=9, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,nrow=2, ncol=2)
+dev.off()
 ```
 
 # **Q3: Through which mechanism of invasion, the native community is most vulnerable?**
@@ -4621,7 +4711,7 @@ grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
 dev.off()
 ```
 
-#### Abiotic ES
+## Abiotic ES
 ```{r echo=FALSE}
 ##### estimated data
 p1<-ggplot(temp3, aes(x = ElevMin, y = ESNatmean)) + geom_point() + xlab("Elevation (m)")+ ylab("Abiotic Effect Size") + annotate("text",x=1500, y=-1, label=paste0("cor = ",round(temp3cor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
