@@ -816,7 +816,7 @@ theme(text=element_text(size=22, color="black"),
       axis.line = element_line(colour = "black"),
       panel.border = element_blank())+ 
   geom_text_repel(aes(label = n),direction="both",color=c(Lightcolor,Nutrientcolor,Watercolor),size=6, point.size=12,segment.colour = NA)+
-   annotate("text", x=-0.49, y=0.95, label="(d)", color="black", fontface = "bold", size=6)
+   annotate("text", x=-0.5, y=0.95, label="(d)", color="black", fontface = "bold", size=6)
 ```
 
 ```{r model1: ESInv~ESNat EN data prep, include=FALSE}
@@ -875,11 +875,11 @@ ggplot(aes(ESNatPred)) +
   annotate("text", x=-1.6, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
   annotate("text", x=1.6, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
   annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
-  annotate("segment", y=0.05, yend=1.95, x=-2.65, xend=-2.65, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
-  annotate("text", y=0, x=-2.83, label="lower", color="black", fontface = "italic",angle=90, size=5) +
-  annotate("text", y=1.95, x=-2.83, label="higher", color="black", fontface = "italic", angle=90, size=5)+
-  annotate("text", y=1, x=-2.83, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
-   annotate("text", x=-1.35, y=2.15, label="(a) Light", color="black", fontface = "bold", size=6)
+  annotate("segment", y=0.05, yend=1.95, x=-2.45, xend=-2.45, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0, x=-2.57, label="lower", color="black", fontface = "italic",angle=90, size=5) +
+  annotate("text", y=1.95, x=-2.57, label="higher", color="black", fontface = "italic", angle=90, size=5)+
+  annotate("text", y=1, x=-2.57, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
+   annotate("text", x=-1.55, y=2.15, label="(a) Light", color="black", fontface = "bold", size=6)
 ```
 
 ```{r model1: ESInv~ESNat EN plot [SOIL NUTRIENT], include=FALSE}
@@ -920,7 +920,7 @@ p2<-ESInvPred %>%
   annotate("text", x=-1.7, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
   annotate("text", x=1.7, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
   annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
-  annotate("text", x=-1.05, y=2.15, label="(b) Soil nutrient", color="black", fontface = "bold", size=6)
+  annotate("text", x=-1.3, y=2.15, label="(b) Soil nutrient", color="black", fontface = "bold", size=6)
 ```
 
 ```{r model1: ESInv~ESNat EN plot [SOIL WATER], include=FALSE}
@@ -962,18 +962,18 @@ ggplot(aes(ESNatPred)) +
   annotate("text", x=-1.6, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
   annotate("text", x=1.6, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
   annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
-  annotate("segment", y=0.05, yend=1.95, x=-2.65, xend=-2.65, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
-  annotate("text", y=0, x=-2.83, label="lower", color="black", fontface = "italic",angle=90, size=5) +
-  annotate("text", y=1.95, x=-2.83, label="higher", color="black", fontface = "italic", angle=90, size=5)+
-  annotate("text", y=1, x=-2.83, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
-   annotate("text", x=-1, y=2.15, label="(c) Soil water", color="black", fontface = "bold", size=6)
+  annotate("segment", y=0.05, yend=1.95, x=-2.45, xend=-2.45, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0, x=-2.57, label="lower", color="black", fontface = "italic",angle=90, size=5) +
+  annotate("text", y=1.95, x=-2.57, label="higher", color="black", fontface = "italic", angle=90, size=5)+
+  annotate("text", y=1, x=-2.57, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
+   annotate("text", x=-1.3, y=2.15, label="(c) Soil water", color="black", fontface = "bold", size=6)
 ```
 
 ```{r echo=FALSE}
 grid.arrange(p1,p2,p3,p4,nrow=2, ncol=2)
 
 #saves
-png(file.path(graph.wd,"ESInvAbiotic_Pred_NEW.png"),width=9, height=9, res=300,units="in")
+png(file.path(graph.wd,"ESInvAbiotic_Pred.png"),width=12, height=9, res=300,units="in")
 grid.arrange(p1,p2,p3,p4,nrow=2, ncol=2)
 dev.off()
 ```
