@@ -4621,7 +4621,7 @@ grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
 dev.off()
 ```
 
-#### Abiotic ES
+## Abiotic ES
 ```{r echo=FALSE}
 ##### estimated data
 p1<-ggplot(temp3, aes(x = ElevMin, y = ESNatmean)) + geom_point() + xlab("Elevation (m)")+ ylab("Abiotic Effect Size") + annotate("text",x=1500, y=-1, label=paste0("cor = ",round(temp3cor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
@@ -4637,3 +4637,109 @@ png(file.path(graph.wd,paste(c("exploratory_ESNatAbiotic_ClimaticVar", format(Sy
 grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
 dev.off()
 ```
+
+# **SM: ES vs. performance metrics**
+## Invasive ES
+```{r echo=FALSE}
+inv <- as.data.frame(es.simInvDiffStudy[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^invESavemean.h", rowname)) %>%
+  rename(ESInvmean = mean,
+         ESInvSD = sd,
+         InvCI2.5 = `2.5%`,
+         InvCI97.5 = `97.5%`) %>%
+  mutate(ObsID = row_number()) 
+
+temp <- InvAllDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, TypeOfResponse, Mechanism, ESInvmean, ESInvSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID,TypeOfResponse) %>% 
+  left_join(inv, by = "ObsID")
+
+temp %>% 
+  ggplot(aes(x = TypeOfResponse, y = ESInvmean)) + 
+  coord_flip()+
+  geom_point(size=5,alpha=0.7) +
+  theme_classic()+
+ ylab("Invasive Effect Size")+
+  theme(axis.text.x = element_text(size=15),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size=18))
+
+# saves
+ggsave(file.path(graph.wd,"ESInv_Performance.png"), plot = last_plot(), width=7.5, height=10, dpi = 300, units="in")
+  
+```
+
+## Native ES
+```{r}
+nat <- as.data.frame(es.simNatDiffStudy[["summary"]])
+
+nat <- nat %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>% 
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(BioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+temp <- BioticDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, TypeOfResponse, Mechanism, ESNatmean, ESNatSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID,TypeOfResponse) %>% 
+  left_join(nat, by = "ObsID")
+
+temp %>% 
+  ggplot(aes(x = TypeOfResponse, y = ESNatmean)) + 
+  coord_flip()+
+  geom_point(size=5,alpha=0.7) +
+  theme_classic()+
+  ylab("Native Effect Size")+
+  theme(axis.text.x = element_text(size=15),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size=15),
+        axis.title.x = element_text(size=18))
+
+# saves
+ggsave(file.path(graph.wd,"ESNat_Performance.png"), plot = last_plot(), width=7.5, height=8, dpi = 300, units="in")
+```
+
+## Abiotic ES
+```{r}
+natabiotic <- as.data.frame(es.simNatAbiotic[["summary"]])
+
+natabiotic <- natabiotic %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>%
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(AbioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+temp <- AbioticDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, TypeOfResponse, Mechanism, ESNatmean, ESNatSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID,TypeOfResponse) %>% 
+  left_join(natabiotic, by = "ObsID")
+
+temp %>% 
+  ggplot(aes(x = TypeOfResponse, y = ESNatmean)) + 
+  coord_flip()+
+  geom_point(size=5,alpha=0.7) +
+  theme_classic()+
+  ylab("Abiotic Effect Size")+
+  theme(axis.text.x = element_text(size=15),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size=15),
+        axis.title.x = element_text(size=18))
+
+# saves
+ggsave(file.path(graph.wd,"ESAbiotic_Performance.png"), plot = last_plot(), width=7.5, height=10, dpi = 300, units="in")
+```
+
