@@ -35,6 +35,7 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ## linked to many functions
 require(tidyverse)
 require(readxl)
+require(broom)
 
 ## basic ones necessary for map
 require(sf)
@@ -57,7 +58,7 @@ require(R2OpenBUGS)
 require(mcmcplots)
 
 ## graphs
-require(inlmisc) 
+require(pals) 
 require(patchwork)
 require(egg) 
 
@@ -76,26 +77,25 @@ parametersout <- file.path(workingdir, "parameters")
 ```{r include=FALSE}
 # Defining colors that will be used later on in the figures
 ## mechanisms
-x<-as.data.frame(inlmisc::GetColors(3, scheme = "bright"))
-BRcolor <- x[1,]
+x<-as.data.frame(pals::brewer.dark2(3))
+BRcolor <- x[3,]
 ENcolor <- x[2,]
-PPcolor <- x[3,]
+PPcolor <- x[1,]
 
 ## abiotic factors
-x<-as.data.frame(inlmisc::GetColors(3, scheme = "high-contrast"))
-Lightcolor <- x[1,]
-Nutrientcolor <- x[2,]
-Watercolor <- x[3,]
+x<-as.data.frame(pals::brewer.paired(12))
+Lightcolor <- x[10,]
+Nutrientcolor <- x[12,]
+Watercolor <- x[6,]
 
 ## number of invaders
-x<-as.data.frame(inlmisc::GetColors(2, scheme = "vibrant"))
-Singlecolor <- x[1,]
+Singlecolor <- x[8,]
 Multicolor <- x[2,]
 
 ## type of ES
-x<-as.data.frame(inlmisc::GetColors(2, scheme = "muted"))
-ESNatcolor <- x[1,]
-ESInvcolor <- x[2,]
+x<-as.data.frame(pals::brewer.set3(10))
+ESNatcolor <- x[4,]
+ESInvcolor <- x[10,]
 ```
 
 # **Importing data**
@@ -107,6 +107,7 @@ InvEstimate <- read.csv(file.path(datain, "InvEstimateRESULTS.csv"))
 NatBioticEstimate <- read.csv(file.path(datain, "NatBioticEstimateRESULTS.csv"))
 NatAbioticEstimate <- read.csv(file.path(datain, "NatAbioticEstimateRESULTS.csv"))
 ```
+
 Column names are reported in the supplementary material
 ```{r importing the estimated data, include=TRUE}
 glimpse(data) # all data
@@ -167,6 +168,7 @@ invESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
 invESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
 ie[i]~dnorm(0,tauI[i])
 iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
+residuals[i]<-invESavemean.h[i]-invESavemean[i]
 }
 
 # priors
@@ -192,7 +194,7 @@ inits <- list(
 )
 
 # parameters
-parameters <- c("beta", "invESavemean.h", "tau", "var")
+parameters <- c("beta", "invESavemean.h", "tau", "var", "residuals")
 
 # running model
 es.simInvDiffStudy <- bugs(datamodel, inits, parameters, model.file = modelESInv, 
@@ -219,8 +221,17 @@ write.csv(x, file.path(parametersout, "ESInv-Mech.csv"), row.names = F)
 x
 ```
 
-+ Model fit:
++ Model residuals
+```{r residuals 1, include=FALSE}
+resInv<-as.data.frame(es.simInvDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(InvAllDataModel)
 
+write.csv(resInv, file.path(parametersout, "ESInv-MechRes.csv"), row.names = F)
+```
+
++ Model fit:
 ```{r echo=FALSE}
 x<-as.data.frame(es.simInvDiffStudy[["summary"]]) # retrieves model results
 invESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^invESavemean.h", rowname)) %>% select(-rowname)
@@ -251,13 +262,13 @@ inv <- inv %>%
          !grepl("^ESIA", rowname),
          !grepl("^tau", rowname),
          !grepl("^var",rowname),
+         !grepl("^residuals",rowname),
          rowname != "deviance") %>%
   mutate(type = "invasive")
 
 forestinv <- inv %>%
   arrange(rowname) %>%
   mutate(test = str_sub(rowname, 6, 6)) %>% 
-  mutate_all(na_if,"") %>% 
   mutate(comparison2 = ifelse(is.na(test), "overall", 
                              ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
   arrange(comparison2) %>%
@@ -345,7 +356,7 @@ natESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
 natESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
 ie[i]~dnorm(0,tauI[i])
 iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
-
+residuals[i]<-natESavemean.h[i]-natESavemean[i]
 }
 
 # priors
@@ -371,7 +382,7 @@ inits <- list(
 )
 
 # parameters
-parameters <- c("beta", "natESavemean.h", "tau", "var")
+parameters <- c("beta", "natESavemean.h", "tau", "var", "residuals")
 
 # running model
 es.simNatDiffStudy <- bugs(datamodel, inits, parameters, model.file = modelESNat,
@@ -396,6 +407,14 @@ x<-as.data.frame(es.simNatDiffStudy[["summary"]]) %>% rownames_to_column(., var 
                                                    grepl("^var", rowname))
 write.csv(x, file.path(parametersout, "ESNat-Mech.csv"), row.names = F)
 x
+```
+
++ Model residuals
+```{r residuals 2, include=FALSE}
+resNat<-as.data.frame(es.simNatDiffStudy[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(BioticDataModel)
 ```
 
 + Model fit
@@ -429,12 +448,12 @@ nat <- nat %>%
          !grepl("^ESIA", rowname),
          !grepl("^tau", rowname),
          !grepl("^var", rowname),
+         !grepl("^residuals",rowname),
          rowname != "deviance") %>%
   mutate(type = "native")
 forestnat <- nat %>%
   arrange(rowname) %>%
   mutate(test = str_sub(rowname, 6, 6)) %>% 
-  mutate_all(na_if,"") %>% 
   mutate(comparison2 = ifelse(is.na(test), "overall", 
                              ifelse(!is.na(test), paste0('mechanism', test), NA))) %>%
   arrange(comparison2) %>%
@@ -656,6 +675,7 @@ invESavemean.h[i]~dnorm(E[i],tau[Category[i]])
 natES[i]~dnorm(natESavemean[i],tauN[i])
 e[i]~dnorm(0,tauI[i])
 E[i]<-alpha[Category[i]]+beta[Category[i]]*natES[i]+iSRE[StudyID[i]]+e[i]
+residuals[i]<-invESavemean.h[i]-invESavemean[i]
 }
 
 # priors
@@ -691,7 +711,7 @@ invpred[m,j]<-alpha[m]+beta[m]*natpred[j]+studyRE+error[m]
 }# end model
 
 # parameters
-parameters <- c("alpha", "beta", "invESavemean.h", "invpred", "tau", "var")
+parameters <- c("alpha", "beta", "invESavemean.h", "invpred", "tau", "var", "residuals")
 
 # initials 
 inits <- list(
@@ -723,6 +743,14 @@ x<-as.data.frame(es.simAbioticPred[["summary"]]) %>% rownames_to_column(., var =
                                                      grepl("^alpha", rowname))
 write.csv(x, file.path(parametersout, "ESInv~resourceAvailability.csv"), row.names = F)
 x
+```
+
++ Model residuals
+```{r residuals 3, include=FALSE}
+resInvAbiotic<-as.data.frame(es.simAbioticPred[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(AbioticDataModel)
 ```
 
 + Model fit
@@ -763,7 +791,7 @@ forest <- forest %>%
 xname <- "Slope (mean+95%CI)"
 
 #forest plot of slope
-ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
+p4<-ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
    geom_errorbarh(data=forest, height=.1, size=1,aes(color=Abiotic_CATEGORY)) +
   geom_point(data = forest, size=5, color=c(Lightcolor,Nutrientcolor,Watercolor),shape=c(21,24,22),fill="white",stroke=1)+
  
@@ -772,27 +800,23 @@ scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels = c(
   scale_color_manual(values=c(Lightcolor,Nutrientcolor,Watercolor)) +
 geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
 theme_bw()+
-  labs(y=NULL)+
   coord_cartesian(ylim = c(3,1), xlim=c(-.5, .5), clip = "off")+
 theme(text=element_text(size=22, color="black"),
       panel.spacing = unit(1, "lines"),
       panel.grid = element_blank(),
       legend.position = "none",
-      axis.title.x = element_text(size = 18, color="black"),
+      axis.title.x = element_text(size = 20, color="black"),
       plot.margin = margin(1,1,1,10),
       panel.background = element_rect(fill='transparent', color=NA),
       plot.background = element_rect(fill='transparent', color=NA),
       axis.text.y=element_blank(),  #remove y axis labels
       axis.ticks.y=element_blank(),
-      axis.title.y=element_blank(),
+      axis.title.y=element_text(size = 12, color="white"),
       axis.text.x = element_text(size=19),
       axis.line = element_line(colour = "black"),
       panel.border = element_blank())+ 
   geom_text_repel(aes(label = n),direction="both",color=c(Lightcolor,Nutrientcolor,Watercolor),size=6, point.size=12,segment.colour = NA)+
-   annotate("text", x=-0.5, y=0.95, label="(b)", color="black", fontface = "bold", size=6)
-
-# saves
-ggsave(file.path(graph.wd,"ESInvAbiotic_PredSlope.png"), plot = last_plot(), width=5, height=6, dpi = 300, units="in")
+   annotate("text", x=-0.5, y=0.95, label="(d)", color="black", fontface = "bold", size=6)
 ```
 
 ```{r model1: ESInv~ESNat EN data prep, include=FALSE}
@@ -811,53 +835,147 @@ ESInvPred <- ESInvPred %>%
          CI975 = `97.5%`)
 ```
 
-```{r model1: ESInv~ESNat EN plot, include=FALSE}
+```{r model1: ESInv~ESNat EN plot [LIGHT], include=FALSE}
 # plotting real data in the background and the prediction lines on top
-  ggplot(ESInvPred, aes(ESNatPred)) +
+AbioticDataModelLight <- AbioticDataModel  %>% filter(AbioticID==1)
+p1<-
+  ESInvPred %>% 
+  filter(AbioticID==1) %>% 
+ggplot(aes(ESNatPred)) +
   geom_hline(yintercept=0, linetype="dashed",
              color = "gray", size=1.5) +
   geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
-  geom_point(data = AbioticDataModel, aes(ESNatmean, ESInvmean, 
+  geom_point(data = AbioticDataModelLight, aes(ESNatmean, ESInvmean, 
                                      color = as.factor(Abiotic_CATEGORY),
                                      group = as.factor(Abiotic_CATEGORY),
-                                     shape = as.factor(Abiotic_CATEGORY)),size=3,alpha=0.8) +
+                                     shape = as.factor(Abiotic_CATEGORY)),size=5,alpha=0.7) +
   theme_bw()+
   scale_x_continuous(expand = c(0,0)) +
   coord_cartesian(ylim = c(-0.2, 2.1), 
                   xlim=c(-2,2), 
                   clip = "off")+
   geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
-  scale_color_manual(values=c(Lightcolor,Nutrientcolor,Watercolor),
-                     labels=c("Light","Soil nutrient","Soil water")) +
-  scale_fill_manual(values=c(Lightcolor,Nutrientcolor,Watercolor), 
-                    labels=c("Light","Soil nutrient","Soil water")) +
-  scale_shape_manual(values=c(16,17,15),labels=c("Light","Soil nutrient","Soil water")) +
-  xlab("Abiotic Effect Size") +
-  ylab("Invasive Effect Size (mean+95%PI)\n\n") +
+  scale_color_manual(values=c(Lightcolor),
+                     labels=c("Light")) +
+  scale_fill_manual(values=c(Lightcolor), 
+                    labels=c("Light")) +
+  scale_shape_manual(values=c(16),labels=c("Light")) +
+  xlab(" ") +
+  ylab("Invasive Effect Size (mean+95%PI)\n") +
   theme(text=element_text(size=20, color="black"),
-        legend.position="bottom",
-        legend.margin=margin(t=-10), # removes space between graph and legend
-        legend.title = element_blank(),
-        panel.grid = element_blank(),
-        legend.text = element_text(size = 17),
-        legend.key.size = unit(0.4, "cm"),
+        legend.position="none",
+         panel.grid = element_blank(),
       plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
       axis.line = element_line(colour = "black"),
       axis.text.y = element_text(size=19),
+      axis.title.y = element_text(color="white"),
+      axis.text.x = element_text(size=19,color="white"),
+      panel.border = element_blank())+
+  annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=-1.6, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
+  annotate("text", x=1.6, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
+  annotate("segment", y=0.05, yend=1.95, x=-2.45, xend=-2.45, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0, x=-2.57, label="lower", color="black", fontface = "italic",angle=90, size=5) +
+  annotate("text", y=1.95, x=-2.57, label="higher", color="black", fontface = "italic", angle=90, size=5)+
+  annotate("text", y=1, x=-2.57, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
+   annotate("text", x=-1.55, y=2.15, label="(a) Light", color="black", fontface = "bold", size=6)
+```
+
+```{r model1: ESInv~ESNat EN plot [SOIL NUTRIENT], include=FALSE}
+# plotting real data in the background and the prediction lines on top
+AbioticDataModelSoil <- AbioticDataModel  %>% filter(AbioticID==2)
+p2<-ESInvPred %>% 
+  filter(AbioticID==2) %>% 
+  ggplot(aes(ESNatPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
+  geom_point(data = AbioticDataModelSoil, aes(ESNatmean, ESInvmean, 
+                                     color = as.factor(Abiotic_CATEGORY),
+                                     group = as.factor(Abiotic_CATEGORY),
+                                     shape = as.factor(Abiotic_CATEGORY)),size=5,alpha=0.7) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-0.2, 2.1), 
+                  xlim=c(-2,2), 
+                  clip = "off")+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
+  scale_color_manual(values=c(Nutrientcolor),
+                     labels=c("Soil nutrient")) +
+  scale_fill_manual(values=c(Nutrientcolor), 
+                    labels=c("Soil nutrient")) +
+  scale_shape_manual(values=c(17),labels=c("Soil nutrient")) +
+  xlab("Abiotic Effect Size") +
+  theme(text=element_text(size=20, color="black"),
+        legend.position="none",
+        panel.grid = element_blank(),
+      plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
+      axis.line = element_line(colour = "black"),
+      axis.text.y = element_blank(),
+      axis.text.x = element_text(size=19),
+      axis.title.y = element_text(size=19,color="white"),
+      panel.border = element_blank())+
+  annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=-1.7, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
+  annotate("text", x=1.7, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
+  annotate("text", x=-1.3, y=2.15, label="(b) Soil nutrient", color="black", fontface = "bold", size=6)
+```
+
+```{r model1: ESInv~ESNat EN plot [SOIL WATER], include=FALSE}
+# plotting real data in the background and the prediction lines on top
+AbioticDataModelWater <- AbioticDataModel %>% filter(AbioticID==3)
+p3<-ESInvPred %>% 
+  filter(AbioticID==3) %>% 
+ggplot(aes(ESNatPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_line(aes(y=ESInvPred, colour = as.factor(Abiotic_CATEGORY), group = as.factor(Abiotic_CATEGORY)), size=1.5) +
+  geom_point(data = AbioticDataModelWater, aes(ESNatmean, ESInvmean, 
+                                     color = as.factor(Abiotic_CATEGORY),
+                                     group = as.factor(Abiotic_CATEGORY),
+                                     shape = as.factor(Abiotic_CATEGORY)),size=5,alpha=0.7) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-0.2, 2.1), 
+                  xlim=c(-2,2), 
+                  clip = "off")+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Abiotic_CATEGORY), fill = as.factor(Abiotic_CATEGORY)), alpha=0.2) +
+  scale_color_manual(values=c(Watercolor),
+                     labels=c("Soil water")) +
+  scale_fill_manual(values=c(Watercolor), 
+                    labels=c("Soil water")) +
+  scale_shape_manual(values=c(15),labels=c("Soil water")) +
+  xlab("Abiotic Effect Size") +
+  ylab("Invasive Effect Size (mean+95%PI)\n") +
+  theme(text=element_text(size=20, color="black"),
+        legend.position="none",
+        panel.grid = element_blank(),
+       plot.margin = margin(1,10,1,1),#defines margin so the graph does not cut off  +
+      axis.line = element_line(colour = "black"),
+      axis.text.y = element_text(size=19),
+      axis.title.y = element_text(hjust=-4),
       axis.text.x = element_text(size=19),
       panel.border = element_blank())+
   annotate("segment", x=-1.9, xend=1.9, y=-0.25, yend=-0.25, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
-  annotate("text", x=-1.8, y=-0.15, label="lower", color="black", fontface = "italic",size=6) +
-  annotate("text", x=1.8, y=-0.15, label="higher", color="black", fontface = "italic",size=6)+
-  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=6) +
-  annotate("segment", y=0.05, yend=1.95, x=-2.35, xend=-2.35, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
-  annotate("text", y=0.05, x=-2.52, label="lower", color="black", fontface = "italic",angle=90, size=6) +
-  annotate("text", y=1.95, x=-2.52, label="higher", color="black", fontface = "italic", angle=90, size=6)+
-  annotate("text", y=1, x=-2.52, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=6)+
-   annotate("text", x=-1.87, y=2.15, label="(a)", color="black", fontface = "bold", size=6)
+  annotate("text", x=-1.6, y=-0.15, label="lower", color="black", fontface = "italic",size=5) +
+  annotate("text", x=1.6, y=-0.15, label="higher", color="black", fontface = "italic",size=5)+
+  annotate("text", x=0, y=-0.15, label="Resource availability", color="black", fontface = "bold.italic",size=5) +
+  annotate("segment", y=0.05, yend=1.95, x=-2.45, xend=-2.45, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=0, x=-2.57, label="lower", color="black", fontface = "italic",angle=90, size=5) +
+  annotate("text", y=1.95, x=-2.57, label="higher", color="black", fontface = "italic", angle=90, size=5)+
+  annotate("text", y=1, x=-2.57, label="Invader performance", color="black", fontface = "bold.italic", angle=90, size=5)+
+   annotate("text", x=-1.3, y=2.15, label="(c) Soil water", color="black", fontface = "bold", size=6)
+```
 
-# saves
-ggsave(file.path(graph.wd,"ESInvAbiotic_Pred.png"), plot = last_plot(), width=8, height=6, dpi = 300, units="in")
+```{r echo=FALSE}
+grid.arrange(p1,p2,p3,p4,nrow=2, ncol=2)
+
+#saves
+png(file.path(graph.wd,"ESInvAbiotic_Pred.png"),width=12, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,nrow=2, ncol=2)
+dev.off()
 ```
 
 # **Q3: Through which mechanism of invasion, the native community is most vulnerable?**
@@ -914,7 +1032,7 @@ natESavemean.h[i]~dnorm(E[i],tau[Mechanism[i]])
 invES[i]~dnorm(invESavemean[i],tauI[i])
 e[i]~dnorm(0,tauN[i])
 E[i]<-beta[Mechanism[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
-
+residuals[i]<-natESavemean.h[i]-natESavemean[i]
 }
 
 # priors
@@ -952,7 +1070,7 @@ natpred[m,j]<-beta[m]*invpred[j]+studyRE+error[m]
 }# end model
 
 # parameters
-parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var")
+parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var", "residuals")
 
 # initials
 inits <- list(
@@ -985,6 +1103,14 @@ write.csv(x, file.path(parametersout, "ESNat-impactMech.csv"), row.names = F)
 x
 ```
 
++ Model residuals
+```{r residuals 4, include=FALSE}
+resNatImpact<-as.data.frame(es.simBiotic[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(BioticDataModel)
+```
+
 + Model fit
 
 ```{r echo=FALSE}
@@ -1009,7 +1135,7 @@ forest <- as.data.frame(es.simBiotic[["summary"]])
 forest <- forest %>% 
   select(mean, sd, `2.5%`, `97.5%`) %>% 
   rownames_to_column(., var = "rowname") %>% 
-  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname),!grepl("^var", rowname)) %>%
+  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname),!grepl("^var", rowname),!grepl("^residuals", rowname)) %>%
   arrange(rowname) %>%
   mutate(Mechanism = seq(1:3),
          type = "beta") %>%
@@ -1126,7 +1252,7 @@ patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') #
 ggsave(file.path(graph.wd,"ESNatInv_Predictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
 ```
 
-# **Q4: Is the native community more impacted by one of multiple invaders?**
+# **Q3: Is the native community more impacted by one of multiple invaders?**
 ### organizing model data
 ```{r}
 #observations per mechanism
@@ -1171,7 +1297,7 @@ natESavemean.h[i]~dnorm(E[i],tau[Category[i]]) #predicted
 invES[i]~dnorm(invESavemean[i],tauI[i])
 e[i]~dnorm(0,tauN[i])
 E[i]<-beta[Category[i]]*invES[i]+iSRE[StudyID[i]]+e[i] # intercept == 0
-
+residuals[i]<-natESavemean.h[i]-natESavemean[i]
 }
 
 # priors
@@ -1208,7 +1334,7 @@ natpred[m,j]<-beta[m]*invpred[j]+studyRE+error[m]
 }# end model
 
 # parameters
-parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var")
+parameters <- c("beta", "natESavemean.h", "natpred", "tau", "var", "residuals")
 
 # initials
 inits <- list(
@@ -1241,6 +1367,14 @@ write.csv(x, file.path(parametersout, "ESNat~impactMultInv.csv"), row.names = F)
 x
 ```
 
++ Model residuals
+```{r residuals 5, include=FALSE}
+resNatMultInv<-as.data.frame(es.simBiotic2[["summary"]]) %>% rownames_to_column(., var = "rowname") %>% 
+  select(rowname, mean, sd, `2.5%`, `97.5%`) %>% filter(grepl("^residuals", rowname)) %>% 
+  mutate(ObsID=row_number()) %>% 
+  left_join(BioticDataModel)
+```
+
 + Model fit
 
 ```{r echo=FALSE}
@@ -1266,7 +1400,7 @@ forest <- as.data.frame(es.simBiotic2[["summary"]])
 forest <- forest %>% 
   select(mean, sd, `2.5%`, `97.5%`) %>% 
   rownames_to_column(., var = "rowname") %>% 
-  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname), !grepl("^var", rowname)) %>%
+  filter(!grepl("^natESavemean.h", rowname),!grepl("^B.h", rowname), rowname != "deviance", !grepl("^alpha", rowname), !grepl("^natpred", rowname),!grepl("^tau", rowname), !grepl("^var", rowname), !grepl("^residuals", rowname)) %>%
   arrange(rowname) %>%
   mutate(comparison2 = paste0("multipleinvader", 1:0),
          type = "beta") %>%
@@ -1370,6 +1504,377 @@ main_plot +
 patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') # overlaps graph to create inset
 
 ggsave(file.path(graph.wd,"ESNatInv_MultInvPredictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
+```
+
+# **SM: Model residuals per covariates**
+## Invasives
+```{r}
+resInv2<- resInv %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Boreal Forests/Taiga","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Flooded Grasslands and Savannas","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Mediterranean Forests, Woodlands and Scrub","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","F",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","G",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","H",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Dry Broadleaf Forests","I",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Grasslands, Savannas and Shrublands","J",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","K",OlsonEtAl2001_GlobalEcoregions))))))))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="deciduous_floodplain_mixed","DD",
+                      ifelse(ForestCommunity=="dry","EE",
+                      ifelse(ForestCommunity=="evergreen","FF",
+                      ifelse(ForestCommunity=="floodplain","GG",
+                      ifelse(ForestCommunity=="mixed","HH",
+                      ifelse(ForestCommunity=="riparian","II",
+                      ifelse(ForestCommunity=="savanna","JJ",
+                      ifelse(ForestCommunity=="semi-deciduous","KK",
+                      ifelse(ForestCommunity=="semi-dry","LL",
+                      ifelse(ForestCommunity=="shrubland","MM",ForestCommunity))))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_primary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary","CCC",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","DDD",
+                   ifelse(TypeOfForest=="plantation","EEE",
+                   ifelse(TypeOfForest=="plantation_and_natural","FFF",
+                   ifelse(TypeOfForest=="restoration_planted","GGG",TypeOfForest)))))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resInv2$variable <- factor(resInv2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resInv2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResESInv.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Natives
+```{r}
+resNat2 <- resNat %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","F",OlsonEtAl2001_GlobalEcoregions)))))),
+ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="deciduous_floodplain_mixed","DD",
+                      ifelse(ForestCommunity=="dry","EE",
+                      ifelse(ForestCommunity=="evergreen","FF",
+                      ifelse(ForestCommunity=="floodplain","GG",
+                      ifelse(ForestCommunity=="mixed","HH",
+                      ifelse(ForestCommunity=="riparian","II",
+                      ifelse(ForestCommunity=="savanna","JJ",
+                      ifelse(ForestCommunity=="semi-deciduous","KK",
+                      ifelse(ForestCommunity=="semi-dry","LL",
+                      ifelse(ForestCommunity=="shrubland","MM","NN"))))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_secondary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD","EEE"))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resNat2$variable <- factor(resNat2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resNat2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResESNat.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Abiotic
+```{r}
+resInvAbiotic2 <- resInvAbiotic %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Boreal Forests/Taiga","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Flooded Grasslands and Savannas","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Mediterranean Forests, Woodlands and Scrub","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","F",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","G",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Grasslands, Savannas and Shrublands","H",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","I",OlsonEtAl2001_GlobalEcoregions))))))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="deciduous_floodplain_mixed","DD",
+                      ifelse(ForestCommunity=="dry","EE",
+                      ifelse(ForestCommunity=="evergreen","FF",
+                      ifelse(ForestCommunity=="floodplain","GG",
+                      ifelse(ForestCommunity=="mixed","HH",
+                      ifelse(ForestCommunity=="riparian","II",
+                      ifelse(ForestCommunity=="savanna","JJ",
+                      ifelse(ForestCommunity=="semi-deciduous","KK",ForestCommunity))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_primary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD",TypeOfForest))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resInvAbiotic2$variable <- factor(resInvAbiotic2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resInvAbiotic2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResESAbiotic.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Invasive impact on native community
+```{r}
+resNatImpact2 <- resNatImpact %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","F",OlsonEtAl2001_GlobalEcoregions)))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="dry","DD",
+                      ifelse(ForestCommunity=="evergreen","EE",
+                      ifelse(ForestCommunity=="floodplain","FF",
+                      ifelse(ForestCommunity=="mixed","GG",
+                      ifelse(ForestCommunity=="riparian","HH",
+                      ifelse(ForestCommunity=="savanna","II",
+                      ifelse(ForestCommunity=="semi-deciduous","JJ",
+                      ifelse(ForestCommunity=="shrubland","KK","LL"))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_secondary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD","EEE"))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resNatImpact2$variable <- factor(resNatImpact2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resNatImpact2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResInvImpactNat.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
+```
+
+## Impact of the number of invasives on native community
+```{r}
+resNatMultInv2 <- resNatMultInv %>% 
+  select(mean, TypeOfStudy, OlsonEtAl2001_GlobalEcoregions, 
+         ForestCommunity, TypeOfForest, Disturbance, NatureOfDisturbance) %>% 
+  mutate(TypeOfStudy=ifelse(TypeOfStudy=="field_experiment", "Field experiment",ifelse(TypeOfStudy=="greenhouse", "Greenhouse", "Observational")),
+         Disturbance=ifelse(Disturbance=="no", "Disturbance absent", "Disturbance present"),
+         NatureOfDisturbance=ifelse(NatureOfDisturbance=="1","Natural",
+                                    ifelse(NatureOfDisturbance=="2","Human-induced","Both")),
+    ForestCommunity=ifelse(ForestCommunity=="riparian_broadleaf" | 
+                                  ForestCommunity=="riparian_deciduous", "riparian", ForestCommunity),
+         ForestCommunity=ifelse(ForestCommunity=="conifer_mixed", "conifer", ForestCommunity),
+    OlsonEtAl2001_GlobalEcoregions=ifelse(OlsonEtAl2001_GlobalEcoregions=="Deserts and Xeric Shrublands","A",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Montane Grasslands and Shrublands","B",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Broadleaf and Mixed Forests","C",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Conifer Forests","D",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Temperate Grasslands, Savannas and Shrublands","E",
+                                   ifelse(OlsonEtAl2001_GlobalEcoregions=="Tropical and Subtropical Moist Broadleaf Forests","F",OlsonEtAl2001_GlobalEcoregions)))))),
+    ForestCommunity = ifelse(ForestCommunity=="broadleaf","AA",
+                      ifelse(ForestCommunity=="conifer","BB",
+                      ifelse(ForestCommunity=="deciduous","CC",
+                      ifelse(ForestCommunity=="dry","DD",
+                      ifelse(ForestCommunity=="evergreen","EE",
+                      ifelse(ForestCommunity=="floodplain","FF",
+                      ifelse(ForestCommunity=="mixed","GG",
+                      ifelse(ForestCommunity=="riparian","HH",
+                      ifelse(ForestCommunity=="savanna","II",
+                      ifelse(ForestCommunity=="semi-deciduous","JJ",
+                      ifelse(ForestCommunity=="shrubland","KK","LL"))))))))))),
+    TypeOfForest = ifelse(TypeOfForest=="natural","AAA",
+                   ifelse(TypeOfForest=="natural_secondary","BBB",
+                   ifelse(TypeOfForest=="natural_secondary_invaded_canopy","CCC",
+                   ifelse(TypeOfForest=="plantation","DDD","EEE"))))) %>% 
+  pivot_longer(2:7, names_to = "variable", values_to = "values") %>%
+  filter(!is.na(values),
+         values!="not_reported")
+
+resNatMultInv2$variable <- factor(resNatMultInv2$variable, levels = c("TypeOfStudy","OlsonEtAl2001_GlobalEcoregions","ForestCommunity", "TypeOfForest","Disturbance","NatureOfDisturbance"))
+
+StripNames <- c("TypeOfStudy"="(a) Study type",
+                                 "OlsonEtAl2001_GlobalEcoregions"="(b) Global ecoregion",
+                                 "ForestCommunity"="(c) Forest community",
+                                 "TypeOfForest"="(d) Forest type",
+                                 "Disturbance"="(e) Presence of disturbance",
+                                 "NatureOfDisturbance"="(f) Type of disturbance")
+
+resNatMultInv2 %>% 
+ggplot(aes(x=values,y=mean))+
+  geom_hline(yintercept=0, color="black", linetype="dashed", alpha=.5, linewidth=1)+
+  geom_point(size=5,alpha=0.5)+
+  facet_wrap(~variable, scales = "free_x", ncol = 2, 
+             labeller = as_labeller(StripNames))+
+  ylab("Model residuals")+
+  theme_classic()+
+  theme(legend.position=c(0.5,-0.17),
+        legend.margin=margin(t=-10),
+        legend.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x = element_text(size = 19,face= "bold", hjust = 0),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22),
+        axis.text.y = element_text(size=19),
+        axis.text.x = element_text(size=15,angle=0),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_blank(),
+        plot.margin = margin(1,10,18,1))
+
+ggsave(file.path(graph.wd, "ResInvNoImpactNat.png"),plot = last_plot(),width=10, height=13, dpi=300,units="in")
 ```
 
 # **SM: Invasive species and native community Performance per variables**
@@ -1494,7 +1999,6 @@ forest2inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -1621,7 +2125,6 @@ forest2nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -1792,7 +2295,6 @@ forest3inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -1921,7 +2423,6 @@ forest3nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2091,7 +2592,6 @@ forest4inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2219,7 +2719,6 @@ forest4nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2388,7 +2887,6 @@ forest1inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2516,7 +3014,6 @@ forest1nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2675,7 +3172,6 @@ forest5inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2802,7 +3298,6 @@ forest5nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -2962,7 +3457,6 @@ forest6inv <- inv %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3089,7 +3583,6 @@ forest6nat <- nat %>%
   mutate(comparison = as.integer(str_sub(rowname, 6, 6)),
          comparison1 = as.integer(str_sub(rowname,6, 7)),
          CategoryID = ifelse(is.na(comparison1), comparison, comparison1)) %>% 
-  mutate_all(na_if,"") %>% 
   arrange(CategoryID) %>%
   left_join(samplesize) %>%
   mutate(index = ifelse(is.na(CategoryID), nrow(inv), CategoryID),
@@ -3394,7 +3887,6 @@ forestinv <- inv %>%
   mutate(Disturbance=as.numeric(Disturbance),
          Mechanism=as.numeric(Mechanism),
          Type=as.numeric(Type)) %>% 
-  mutate_all(na_if,"") %>% 
   left_join(samplesize) %>% 
   filter(!is.na(index)) %>% 
   rbind(ESInvEXCLUDED) %>% 
@@ -3651,7 +4143,6 @@ forestnat <- nat %>%
   mutate(Disturbance=as.numeric(Disturbance),
          Mechanism=as.numeric(Mechanism),
          Type=as.numeric(Type)) %>% 
-  mutate_all(na_if,"") %>% 
   left_join(samplesize) %>% 
   filter(!is.na(index)) %>% 
   rbind(ESNatEXCLUDED) %>% 
@@ -3665,7 +4156,8 @@ PPnat <- forestnat %>% filter(Mechanism==1) %>% mutate(category="nat")
 
 PPinv <- forestinv %>% filter(Mechanism==1) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
 
-PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% mutate(rowname=ifelse(is.na(rowname),row_number(),rowname),
+PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% 
+  mutate(rowname=ifelse(is.na(rowname),row_number(),rowname),
                                                     category=ifelse(rowname=="10","nat",
                                                             ifelse(rowname=="11","inv",
                                                             ifelse(rowname=="12","nat",
@@ -3674,7 +4166,13 @@ PP <- PPnat %>% rbind(PPinv,NA,NA,NA,NA) %>% mutate(rowname=ifelse(is.na(rowname
                                                             ifelse(rowname=="11","beta[1,1,3]",
                                                             ifelse(rowname=="12","beta[1,1,3]",
                                                             ifelse(rowname=="13","beta[1,1,4]",rowname))))) %>%
-  group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[1,2]", index-1,ifelse(rowname=="BB[1,1]", index+1,index))) %>% arrange(index)
+  group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[1,2]", index-1,ifelse(rowname=="BB[1,1]", index+1,index))) %>% 
+  mutate(index=ifelse(rowname=="BB[1,2]", index+100,
+                      ifelse(rowname=="BB[1,1]", index+100,
+                      ifelse(index==3, 1, 
+                             ifelse(index==3.2, 1.2, index)))),
+         index=ifelse(rowname=="BB[1,2]", index-99,
+                      ifelse(rowname=="BB[1,1]", index-99,index))) %>% arrange(index)
 
  p1<-
   ggplot(data=PP, 
@@ -3715,7 +4213,13 @@ BRnat <- forestnat %>% filter(Mechanism==3) %>% mutate(category="nat")
 
 BRinv <- forestinv %>% filter(Mechanism==3) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
 
-BR <- BRnat %>% rbind(BRinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[3,2]", index-1,ifelse(rowname=="BB[3,1]", index+1,index))) %>% arrange(index)
+BR <- BRnat %>% rbind(BRinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[3,2]", index-1,ifelse(rowname=="BB[3,1]", index+1,index))) %>% 
+  mutate(index=ifelse(rowname=="BB[3,2]", index+100,
+                      ifelse(rowname=="BB[3,1]", index+100,
+                      ifelse(index==3, 1, 
+                             ifelse(index==3.2, 1.2, index)))),
+         index=ifelse(rowname=="BB[3,2]", index-99,
+                      ifelse(rowname=="BB[3,1]", index-99,index))) %>% arrange(index)
 
 p2<-
   ggplot(data=BR, 
@@ -3755,7 +4259,13 @@ ENnat <- forestnat %>% filter(Mechanism==2) %>% mutate(category="nat")
 
 ENinv <- forestinv %>% filter(Mechanism==2) %>% mutate(category="inv",treatment=ifelse(treatment=="a","c","d"))
 
-EN <- ENnat %>% rbind(ENinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[2,2]", index-1,ifelse(rowname=="BB[2,1]", index+1,index))) %>% arrange(index)
+EN <- ENnat %>% rbind(ENinv) %>% arrange(rowname) %>% group_by(rowname) %>% mutate(index=cur_group_id(),index=ifelse(category=="nat", index+0.2, index),index=ifelse(rowname=="BB[2,2]", index-1,ifelse(rowname=="BB[2,1]", index+1,index))) %>% 
+  mutate(index=ifelse(rowname=="BB[2,2]", index+100,
+                      ifelse(rowname=="BB[2,1]", index+100,
+                      ifelse(index==3, 1, 
+                             ifelse(index==3.2, 1.2, index)))),
+         index=ifelse(rowname=="BB[2,2]", index-99,
+                      ifelse(rowname=="BB[2,1]", index-99,index))) %>% arrange(index)
 
  p3<-
   ggplot(data=EN, 
@@ -3834,7 +4344,7 @@ ggplot(data = world) + #plot the object as a map
 ggsave(file.path(graph.wd,paste(c("map", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")), dpi=300, scale=2, width=7, height=3.2) #saves the last generated plot
 ```
 
-# **SM: Funnel plots**
+# **SM: Funnel plots and Egger's regression test**
 ```{r include=FALSE}
 # Invasive performance
 glimpse(InvEstimate)
@@ -3863,6 +4373,7 @@ plot1<-ggplot(InvEstimateFP) +
       axis.line = element_line(colour = "black"),
       panel.border = element_blank())
 ```
+
 
 ```{r include=FALSE}
 # Native Performance
@@ -3942,3 +4453,383 @@ png(file.path(graph.wd, "FunnelPlots.png"),width=8, height=3, res=300,units="in"
 grid::grid.draw(rbind(cbind(p1,p2, p3))) # allow graphs to align right
 dev.off()
 ```
+
++ Egger's regression test
+```{r}
+InvEstimateFP %>% 
+  mutate(y = ESInvmean/ESInvSD, x = Variance) %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy(conf.int = TRUE) #funnel plot is asymmetrical, intercept is statistically significant
+
+NatBioticEstimateFP %>% 
+  mutate(y = ESNatmean/ESNatSD, x = Variance) %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
+
+NatAbioticEstimateFP %>% 
+  mutate(y = ESNatmean/ESNatSD, x = Variance) %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy(conf.int = TRUE) #funnel plot is not asymmetrical, intercept contains zero
+```
+
+# **SM: ES vs. climatic variables**
+```{r model abiotic, include=FALSE}
+# organizing the data
+J <- nrow(AbioticDataModel)
+StudyID <- AbioticDataModel$StudyID # model with study random effects
+Mechanism <- AbioticDataModel$Mechanism
+natESavemean <- AbioticDataModel$ESNatmean
+natESavesd <- AbioticDataModel$ESNatSD
+M <- max(AbioticDataModel$ESNatSD, na.rm = T) 
+K <- length(unique(AbioticDataModel$Mechanism))
+R <- K+1 
+W <- length(unique(AbioticDataModel$StudyID))# model with study random effects
+datamodel <- list (J=J, StudyID=StudyID, Mechanism=Mechanism, natESavemean=natESavemean, natESavesd=natESavesd, M=M, K=K, R=R, W=W)
+
+# model abiotic
+#model
+modelESNatAbiotic <- function() {
+  for(i in 1:J){
+# missing values
+natESavesd[i]~dnorm(M,1)%_%C(0,)
+tauI[i]<-1/(natESavesd[i]*natESavesd[i])
+natESavemean[i]~dnorm(iE[i],tau[Mechanism[i]])
+natESavemean.h[i]~dnorm(iE[i],tau[Mechanism[i]])
+ie[i]~dnorm(0,tauI[i])
+iE[i]<-beta[Mechanism[i]]+iSRE[StudyID[i]]+ie[i]
+}
+# priors
+  for(i in 1:K){
+beta[i]~dnorm(0,0.0001)
+  }
+for(i in 1:W){ # StudyRE
+iSRE[i]~dnorm(0,tau[R])
+}
+  for(i in 1:R){ # change to K if model only error term; or R for model error + studyRE
+tau[i]<-1/var[i]
+var[i]~dunif(0,10)
+}
+} # end model
+# # initials - model error + studyRE
+inits <- list(
+  list(beta = c(rep(1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(-1, times=K)), var = c(rep(1, times = R))),
+  list(beta = c(rep(0, times=K)), var = c(rep(1, times = R)))
+)
+#parameters
+parameters <- c("beta", "natESavemean.h", "tau")
+# parameters <- c("beta", "tau") #simpler. Takes less time to run the model, but I can plot afterwards. I need to rerun the model.
+#running model
+es.simNatAbiotic <- bugs(datamodel, inits, parameters, model.file = modelESNatAbiotic, n.chains=3, n.burnin=25000, n.iter=75000, debug = F)
+#DIC value - reasonable value.
+es.simNatAbiotic[["DIC"]] 
+#trace plots - betas converge really well, but they are not actually different
+traplot(es.simNatAbiotic, "beta")
+
+#getting results
+x<-as.data.frame(es.simNatAbiotic[["summary"]]) #this contains the mean, sd and CI intervals of each of the parameters defined above
+### Model Fit ###
+natESavemean.h <- x %>% select(mean) %>% rownames_to_column(., var = "rowname") %>% filter(grepl("^natESavemean.h", rowname)) %>% select(-rowname)
+data3 <- cbind(natESavemean.h,natESavemean) ## predictions vs. estimated values
+colnames(data3) <- c("predicted", "estimated")
+m1 <- lm(predicted~estimated, data = data3)
+# summary(m1) ##R2 is the model fit
+plot(predicted~estimated, data = data3, main = "ESInvmean\npredicted vs. estimated values")
+abline(m1, col = 'red', lty = 'dashed', lwd = 1.5)
+r2 = summary(m1)$adj.r.squared
+mylabel = bquote(italic(R)^2 == .(format(r2)))
+text(x = 0.2, y = 1.5, labels = mylabel)
+```
+
+```{r echo=FALSE}
+# data prep
+temp_climatic <- data %>% 
+  select(Elevation_m, Precipitation_mm, JanuaryTemp_C, JulyTemp_C, MeanAnnualTemp_C,YearOfDataMeasurement, ObsIDOriginal)
+
+## Invasive ES
+inv <- as.data.frame(es.simInvDiffStudy[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^invESavemean.h", rowname)) %>%
+  rename(ESInvmean = mean,
+         ESInvSD = sd,
+         InvCI2.5 = `2.5%`,
+         InvCI97.5 = `97.5%`) %>%
+  mutate(ObsID = row_number()) 
+
+temp <- InvAllDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, MultipleInvader, Mechanism, ESInvmean, ESInvSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID) %>% 
+  left_join(inv, by = "ObsID")
+
+temp <- temp %>% select(ESInvmean, ObsIDOriginal) %>% 
+  left_join(temp_climatic, by = "ObsIDOriginal") %>%
+  #substitutes "several_locations" for NA no matter the column it is in
+  mutate_all(function(x) gsub("several_locations", NA, x)) %>%
+  mutate(YearOfDataMeasurement = ifelse(grepl("^~", YearOfDataMeasurement), "1945", YearOfDataMeasurement)) %>%
+  separate(Elevation_m, c("ElevMin", "ElevMax"), sep = "([-])",
+         extra = "merge") %>%
+  separate(Precipitation_mm, c("PrecipMin", "PrecipMax"), sep = "([;-])",
+         extra = "merge")%>%
+  separate(JanuaryTemp_C, c("JanMin", "JanMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(JulyTemp_C, c("JulMin", "JulMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(MeanAnnualTemp_C, c("AnnualMin", "AnnualMax"), sep = "([;])",
+         extra = "merge") %>%
+  separate(YearOfDataMeasurement, c("YearMin", "YearMax"), sep = "([;-])",
+         extra = "merge") %>%
+  separate(YearMin, c("YearMin", "Year2Max"), sep = "\\s",
+         extra = "merge") %>%
+  #mutate all columns removing any extra spaces
+  mutate_all(function(x) str_trim(x)) %>%
+  select(-ends_with("Max")) %>%
+  #pivot_longer(!c(ESinv, ESnat, ObsIDOriginal), names_to = "variable", values_to = "value") %>%
+  type_convert() 
+
+tempcor<-as.data.frame(cor(temp, use="pairwise.complete.obs"))
+tempcor<-tempcor %>% rownames_to_column(., var = "rowname") %>% filter(rowname=="ESInvmean")
+
+## Native community ES
+nat <- as.data.frame(es.simNatDiffStudy[["summary"]])
+
+nat <- nat %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>% 
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(BioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+
+temp2 <- nat %>% select(ESNatmean, ObsIDOriginal) %>% 
+  left_join(temp_climatic, by = "ObsIDOriginal") %>%
+  #substitutes "several_locations" for NA no matter the column it is in
+  mutate_all(function(x) gsub("several_locations", NA, x)) %>%
+  mutate(YearOfDataMeasurement = ifelse(grepl("^~", YearOfDataMeasurement), "1945", YearOfDataMeasurement)) %>%
+  separate(Elevation_m, c("ElevMin", "ElevMax"), sep = "([-])",
+         extra = "merge") %>%
+  separate(Precipitation_mm, c("PrecipMin", "PrecipMax"), sep = "([;-])",
+         extra = "merge")%>%
+  separate(JanuaryTemp_C, c("JanMin", "JanMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(JulyTemp_C, c("JulMin", "JulMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(MeanAnnualTemp_C, c("AnnualMin", "AnnualMax"), sep = "([;])",
+         extra = "merge") %>%
+  separate(YearOfDataMeasurement, c("YearMin", "YearMax"), sep = "([;-])",
+         extra = "merge") %>%
+  separate(YearMin, c("YearMin", "Year2Max"), sep = "\\s",
+         extra = "merge") %>%
+  #mutate all columns removing any extra spaces
+  mutate_all(function(x) str_trim(x)) %>%
+  select(-ends_with("Max")) %>%
+  #pivot_longer(!c(ESinv, ESnat, ObsIDOriginal), names_to = "variable", values_to = "value") %>%
+  type_convert()
+
+temp2cor<-as.data.frame(cor(temp2, use="pairwise.complete.obs"))
+temp2cor<-temp2cor %>% rownames_to_column(., var = "rowname") %>% filter(rowname=="ESNatmean")
+
+## Abiotic ES
+natabiotic <- as.data.frame(es.simNatAbiotic[["summary"]])
+
+natabiotic <- natabiotic %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>%
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(AbioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+temp3 <- natabiotic %>% select(ESNatmean, ObsIDOriginal) %>% 
+  left_join(temp_climatic, by = "ObsIDOriginal") %>%
+  #substitutes "several_locations" for NA no matter the column it is in
+  mutate_all(function(x) gsub("several_locations", NA, x)) %>%
+  mutate(YearOfDataMeasurement = ifelse(grepl("^~", YearOfDataMeasurement), "1945", YearOfDataMeasurement)) %>%
+  separate(Elevation_m, c("ElevMin", "ElevMax"), sep = "([-])",
+         extra = "merge") %>%
+  separate(Precipitation_mm, c("PrecipMin", "PrecipMax"), sep = "([;-])",
+         extra = "merge")%>%
+  separate(JanuaryTemp_C, c("JanMin", "JanMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(JulyTemp_C, c("JulMin", "JulMax"), sep = "([;])",
+         extra = "merge")%>%
+  separate(MeanAnnualTemp_C, c("AnnualMin", "AnnualMax"), sep = "([;])",
+         extra = "merge") %>%
+  separate(YearOfDataMeasurement, c("YearMin", "YearMax"), sep = "([;-])",
+         extra = "merge") %>%
+  separate(YearMin, c("YearMin", "Year2Max"), sep = "\\s",
+         extra = "merge") %>%
+  #mutate all columns removing any extra spaces
+  mutate_all(function(x) str_trim(x)) %>%
+  select(-ends_with("Max")) %>%
+  #pivot_longer(!c(ESinv, ESnat, ObsIDOriginal), names_to = "variable", values_to = "value") %>%
+  type_convert()
+
+temp3cor<-as.data.frame(cor(temp3, use="pairwise.complete.obs"))
+temp3cor<-temp3cor %>% rownames_to_column(., var = "rowname") %>% filter(rowname=="ESNatmean")
+```
+
+## Invasive ES
+```{r echo=FALSE}
+### observed data
+require(gridExtra)
+p1<-ggplot(temp, aes(x = ElevMin, y = ESInvmean)) + geom_point() + xlab("Elevation (m)") + ylab("Invasive Effect Size") + annotate("text",x=1500, y=1.7, label=paste0("cor = ",round(tempcor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank()) #+ geom_smooth(method='lm')
+# weird point obs #11
+p2<-ggplot(temp, aes(x = PrecipMin, y = ESInvmean)) + geom_point() + xlab("Annual precipitation (mm)") + theme(axis.title.y=element_blank())+ annotate("text",x=3000, y=1.7, label=paste0("cor = ",round(tempcor$PrecipMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+p3<-ggplot(temp, aes(x = JanMin, y = ESInvmean)) + geom_point() + xlab("Average January temperature (°C)")+ ylab("Invasive Effect Size")+ annotate("text",x=32, y=1.7, label=paste0("cor = ",round(tempcor$JanMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+p4<-ggplot(temp, aes(x = JulMin, y = ESInvmean)) + geom_point() + xlab("Average July temperature (°C)")+ theme(axis.title.y=element_blank())+ annotate("text",x=5, y=1.7, label=paste0("cor = ",round(tempcor$JulMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+# weird point obs #50
+p5<-ggplot(temp, aes(x = AnnualMin, y = ESInvmean)) + geom_point() + xlab("Average Annual temperature (°C)")+ ylab("Invasive Effect Size")+ annotate("text",x=5, y=1.7, label=paste0("cor = ",round(tempcor$AnnualMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+# two obs that are older than the others
+p6<-ggplot(temp, aes(x = YearMin, y = ESInvmean)) + geom_point() + xlab("Year of data collection") + theme(axis.title.y=element_blank())+ annotate("text",x=1960, y=1.7, label=paste0("cor = ",round(tempcor$YearMin,2)), color="black", fontface="bold.italic", size=4)+ theme(panel.grid = element_blank())
+
+# saving
+png(file.path(graph.wd,paste(c("exploratory_ESInv_ClimaticVar", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")),width=8, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
+dev.off()
+```
+
+## Native ES
+```{r echo=FALSE}
+##### estimated data
+p1<-ggplot(temp2, aes(x = ElevMin, y = ESNatmean)) + geom_point() + xlab("Elevation (m)") + ylab("Native Community Effect Size") + annotate("text",x=1250, y=0.7, label=paste0("cor = ",round(temp2cor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# + geom_smooth(method='lm')
+p2<-ggplot(temp2, aes(x = PrecipMin, y = ESNatmean)) + geom_point() + xlab("Annual precipitation (mm)") + theme(axis.title.y=element_blank())+ annotate("text",x=3000, y=0.7, label=paste0("cor = ",round(temp2cor$PrecipMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p3<-ggplot(temp2, aes(x = JanMin, y = ESNatmean)) + geom_point() + xlab("Average January temperature (°C)")+ ylab("Native Community Effect Size")+ annotate("text",x=30, y=0.7, label=paste0("cor = ",round(temp2cor$JanMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p4<-ggplot(temp2, aes(x = JulMin, y = ESNatmean)) + geom_point() + xlab("Average July temperature (°C)")+ theme(axis.title.y=element_blank())+ annotate("text",x=15, y=0.7, label=paste0("cor = ",round(temp2cor$JulMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p5<-ggplot(temp2, aes(x = AnnualMin, y = ESNatmean)) + geom_point() + xlab("Average Annual temperature (°C)")+ ylab("Native Community Effect Size")+ annotate("text",x=20, y=0.7, label=paste0("cor = ",round(temp2cor$AnnualMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# two obs that are older than the others
+p6<-ggplot(temp2, aes(x = YearMin, y = ESNatmean)) + geom_point() + xlab("Year of data collection") + theme(axis.title.y=element_blank())+ annotate("text",x=1980, y=0.7, label=paste0("cor = ",round(temp2cor$YearMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+
+# saving
+png(file.path(graph.wd,paste(c("exploratory_ESNatBiotic_ClimaticVar", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")),width=8, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
+dev.off()
+```
+
+## Abiotic ES
+```{r echo=FALSE}
+##### estimated data
+p1<-ggplot(temp3, aes(x = ElevMin, y = ESNatmean)) + geom_point() + xlab("Elevation (m)")+ ylab("Abiotic Effect Size") + annotate("text",x=1500, y=-1, label=paste0("cor = ",round(temp3cor$ElevMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# + geom_smooth(method='lm')
+p2<-ggplot(temp3, aes(x = PrecipMin, y = ESNatmean)) + geom_point() + xlab("Annual precipitation (mm)") + theme(axis.title.y=element_blank()) + annotate("text",x=3500, y=-1, label=paste0("cor = ",round(temp3cor$PrecipMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p3<-ggplot(temp3, aes(x = JanMin, y = ESNatmean)) + geom_point() + xlab("Average January temperature (°C)") + ylab("Abiotic Effect Size") + annotate("text",x=20, y=-1, label=paste0("cor = ",round(temp3cor$JanMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p4<-ggplot(temp3, aes(x = JulMin, y = ESNatmean)) + geom_point() + xlab("Average July temperature (°C)")+ theme(axis.title.y=element_blank()) + annotate("text",x=7, y=-1, label=paste0("cor = ",round(temp3cor$JulMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+p5<-ggplot(temp3, aes(x = AnnualMin, y = ESNatmean)) + geom_point() + xlab("Average Annual temperature (°C)") + ylab("Abiotic Effect Size") + annotate("text",x=23, y=-1, label=paste0("cor = ",round(temp3cor$AnnualMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# two obs that are older than the others
+p6<-ggplot(temp3, aes(x = YearMin, y = ESNatmean)) + geom_point() + xlab("Year of data collection") + theme(axis.title.y=element_blank()) + annotate("text",x=1995, y=-1, label=paste0("cor = ",round(temp3cor$YearMin,2)), color="black", fontface="bold.italic", size=4) + theme(panel.grid = element_blank())
+# saving
+png(file.path(graph.wd,paste(c("exploratory_ESNatAbiotic_ClimaticVar", format(Sys.time(), "%m%d%Y"), ".png"), collapse="")),width=8, height=9, res=300,units="in")
+grid.arrange(p1,p2,p3,p4,p5,p6, nrow=3, ncol=2)
+dev.off()
+```
+
+# **SM: ES vs. performance metrics**
+## Invasive ES
+```{r echo=FALSE}
+inv <- as.data.frame(es.simInvDiffStudy[["summary"]])
+inv <- inv %>% 
+  select(mean, sd, `2.5%`, `97.5%`) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^invESavemean.h", rowname)) %>%
+  rename(ESInvmean = mean,
+         ESInvSD = sd,
+         InvCI2.5 = `2.5%`,
+         InvCI97.5 = `97.5%`) %>%
+  mutate(ObsID = row_number()) 
+
+temp <- InvAllDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, TypeOfResponse, Mechanism, ESInvmean, ESInvSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID,TypeOfResponse) %>% 
+  left_join(inv, by = "ObsID")
+
+temp %>% 
+  ggplot(aes(x = TypeOfResponse, y = ESInvmean)) + 
+  coord_flip()+
+  geom_point(size=5,alpha=0.7) +
+  theme_classic()+
+ ylab("Invasive Effect Size")+
+  theme(axis.text.x = element_text(size=15),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size=18))
+
+# saves
+ggsave(file.path(graph.wd,"ESInv_Performance.png"), plot = last_plot(), width=7.5, height=10, dpi = 300, units="in")
+  
+```
+
+## Native ES
+```{r}
+nat <- as.data.frame(es.simNatDiffStudy[["summary"]])
+
+nat <- nat %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>% 
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(BioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+temp <- BioticDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, TypeOfResponse, Mechanism, ESNatmean, ESNatSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID,TypeOfResponse) %>% 
+  left_join(nat, by = "ObsID")
+
+temp %>% 
+  ggplot(aes(x = TypeOfResponse, y = ESNatmean)) + 
+  coord_flip()+
+  geom_point(size=5,alpha=0.7) +
+  theme_classic()+
+  ylab("Native Effect Size")+
+  theme(axis.text.x = element_text(size=15),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size=15),
+        axis.title.x = element_text(size=18))
+
+# saves
+ggsave(file.path(graph.wd,"ESNat_Performance.png"), plot = last_plot(), width=7.5, height=8, dpi = 300, units="in")
+```
+
+## Abiotic ES
+```{r}
+natabiotic <- as.data.frame(es.simNatAbiotic[["summary"]])
+
+natabiotic <- natabiotic %>% 
+  select(mean, sd) %>% 
+  rownames_to_column(., var = "rowname") %>% 
+  filter(grepl("^natESavemean.h", rowname)) %>%
+  rename(ESNatmean = mean) %>% 
+  mutate(ObsID = row_number()) %>% 
+  left_join(select(AbioticDataModel, c(ObsID, ObsIDOriginal)), by = "ObsID")
+
+temp <- AbioticDataModel %>% 
+  select(-ObsID, -StudyID) %>% 
+  distinct(StudyIDOriginal, TypeOfResponse, Mechanism, ESNatmean, ESNatSD, .keep_all = T) %>% 
+  mutate(ObsID = row_number()) %>% 
+  select(ObsIDOriginal, ObsID,TypeOfResponse) %>% 
+  left_join(natabiotic, by = "ObsID")
+
+temp %>% 
+  ggplot(aes(x = TypeOfResponse, y = ESNatmean)) + 
+  coord_flip()+
+  geom_point(size=5,alpha=0.7) +
+  theme_classic()+
+  ylab("Abiotic Effect Size")+
+  theme(axis.text.x = element_text(size=15),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size=15),
+        axis.title.x = element_text(size=18))
+
+# saves
+ggsave(file.path(graph.wd,"ESAbiotic_Performance.png"), plot = last_plot(), width=7.5, height=10, dpi = 300, units="in")
+```
+
