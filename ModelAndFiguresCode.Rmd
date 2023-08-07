@@ -1157,24 +1157,26 @@ xname <- "Slope (mean+95%CI)"
 inset_plot <-
   ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
   geom_errorbarh(data=forest, height=.1, size=1,color=forest$treatment2) +
-  geom_point(data = forest, size=4, shape=forest$shape, color=forest$treatment2,fill=forest$treatment,stroke=1)+
+  geom_point(data = forest, size=6, shape=forest$shape, color=forest$treatment2,fill=forest$treatment,stroke=1)+
     scale_x_continuous(limits=c(-0.8,0.15), name=xname, breaks = c(-0.8, -0.4, 0)) +
-  scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels=NULL) +
+  scale_y_continuous(name = "title\n\n", breaks=1:nrow(forest),trans="reverse", labels=NULL) +
   geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
   theme_bw()+
   coord_cartesian(ylim=c(3.1,0.9),clip = "off")+
   theme(panel.spacing = unit(1, "lines"),
       panel.grid = element_blank(),
       legend.position = "none",
-      axis.text.x=element_text(size = 13),
-      axis.title = element_text(size = 13, color="black"),
+      plot.margin = margin(1,10,1,15),
+      axis.text.x=element_text(size = 20),
+      axis.title = element_text(size = 22, color="black"),
       panel.background = element_rect(fill='transparent', color=NA),
       plot.background = element_rect(fill='transparent', color=NA),
+      panel.border = element_blank(),
       axis.ticks.y=element_blank(),
-      axis.title.y=element_blank())+ 
-  annotate("text", x=-0.45, y=2.5, label="(15)", color=PPcolor, size=5)+
-  annotate("text", x=-0.45, y=1.5, label="(52)", color=BRcolor, size=5)+
-  annotate("text", x=-0.09, y=1.4, label="(36)", color=ENcolor, size=5)
+      axis.title.y=element_text(color="white"),
+      axis.line = element_line(colour = "black"))+
+  geom_text_repel(aes(label = n),direction="both",color=c(PPcolor,ENcolor,BRcolor),size=6, point.size=12,segment.colour = NA)+
+   annotate("text", x=-0.8, y=0.85, label="(d)", color="black", fontface = "bold", size=6)
 ``` 
 
 
@@ -1200,78 +1202,164 @@ ESNatPred <- ESNatPred %>%
          CI975 = `97.5%`)
 ```
 
-```{r model1: ESNat~ESInv plot, include=FALSE}
-## ESNat~ESInv with predictions by mechanism + inset
-main_plot <-
-  ggplot(ESNatPred, aes(ESInvPred)) +
+```{r model1: ESNat~ESInv plot [PROPAGULE PRESSURE], include=FALSE}
+## ESNat~ESInv with predictions by mechanism
+
+BioticDataModelPP <- BioticDataModel %>% filter(Mechanismdummy=="Propagule pressure")
+
+p1<-
+  ESNatPred %>% 
+  filter(Mechanism==1) %>% 
+  ggplot(aes(x=ESInvPred)) +
   geom_hline(yintercept=0, linetype="dashed",
              color = "gray", size=1.5) +
-  geom_point(data = BioticDataModel, aes(invESavemean, natESavemean,
+  geom_point(data = BioticDataModelPP, aes(ESInvmean, ESNatmean,
                                      color = as.factor(Mechanismdummy),
-                                     group = as.factor(Mechanismdummy),
-                                     shape=as.factor(Mechanismdummy)),size=3,alpha=0.8) +
+                                     group = as.factor(Mechanismdummy)),
+                                     shape=15,size=3,alpha=0.8) +
   geom_line(aes(y=ESNatPred, colour = as.factor(Mechanismdummy), group = as.factor(Mechanismdummy)), size=1.5) +
   theme_bw()+
   scale_x_continuous(expand = c(0,0)) +
   coord_cartesian(ylim = c(-2.1, 2), xlim=c(0,2), clip = "off")+
-  scale_color_manual(values=c(ENcolor,BRcolor,PPcolor))+
-    scale_fill_manual(values=c(ENcolor,BRcolor,PPcolor))+
+  scale_color_manual(values=c(PPcolor))+
+    scale_fill_manual(values=c(PPcolor))+
   geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Mechanismdummy), fill = as.factor(Mechanismdummy)), alpha=0.2) +
-  xlab("Invasive Effect Size") +
+  xlab(" ")+
   ylab("Impact on native community\n\n ") +
   guides(color = guide_legend(nrow = 1))+
-  theme(legend.position=c(0.4,-0.17),
-        legend.margin=margin(t=-10),
-        legend.title = element_blank(),
+  theme(legend.position="none",
         panel.grid = element_blank(),
-        legend.text = element_text(size = 15),
-        legend.key.size = unit(0.4, "cm"),
         axis.title.x = element_text(size = 20),
-        axis.title.y = element_text(size = 22),
+        axis.title.y = element_text(size = 21,color="white"),
         axis.text.y = element_text(size=19),
-      axis.text.x = element_text(size=19),
+      axis.text.x = element_text(size=19,color="white"),
         axis.line = element_line(colour = "black"),
       panel.border = element_blank(),
-      plot.margin = margin(1,10,18,1))+  #defines margin so the graph does not cut off) 
+      plot.margin = margin(1,1,1,1))+  #defines margin so the graph does not cut off) 
   annotate("segment", x=0.1, xend=1.9, y=-2.16, yend=-2.16, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
   annotate("text", x=0.2, y=-1.95, label="lower", color="black", fontface = "italic", size=6) +
   annotate("text", x=1.8, y=-1.95, label="higher", color="black", fontface = "italic", size=6)+
   annotate("text", x=1, y=-1.95, label="Performance", color="black", fontface = "bold.italic", size=6) +
   annotate("segment", y=2, yend=-1.9, x=-0.15, xend=-0.15, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
   annotate("text", y=-1.9, x=-0.23, label="higher", color="black", fontface = "italic",angle=90, size=6) +
-  annotate("text", y=1.9, x=-0.23, label="lower", color="black", fontface = "italic", angle=90, size=6)+
+  annotate("text", y=1.75, x=-0.23, label="lower", color="black", fontface = "italic", angle=90, size=6)+
   annotate("text", y=0, x=-0.23, label="Impact", color="black", fontface = "bold.italic", angle=90, size=6)+
-   annotate("text", x=0.08, y=2.14, label="(a)", color="black", fontface = "bold", size=6)+
-  annotate("text", y=0, x=-0.325, label="Effect Size (mean+95%PI)", color="black", angle=90,size=6)
+   annotate("text", x=0.59, y=2.1, label="(a) Propagule pressure", color="black", fontface = "bold", size=6)# +
+  # annotate("text", y=0, x=-0.325, label="Effect Size (mean+95%PI)", color="black", angle=90,size=6)
 
-# adds the inset graph
-main_plot +
-patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') # overlaps graph to create inset
-
-# saves
-ggsave(file.path(graph.wd,"ESNatInv_Predictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
 ```
+
+```{r model1: ESNat~ESInv plot [LOW BIOTIC RESISTANCE], include=FALSE}
+## ESNat~ESInv with predictions by mechanism
+
+BioticDataModelBR <- BioticDataModel %>% filter(Mechanismdummy=="Low biotic resistance")
+
+p2<-
+  ESNatPred %>% 
+  filter(Mechanism==3) %>% 
+  ggplot(aes(x=ESInvPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_point(data = BioticDataModelBR, aes(ESInvmean, ESNatmean,
+                                     color = as.factor(Mechanismdummy),
+                                     group = as.factor(Mechanismdummy)),
+                                     shape=17,size=3,alpha=0.8) +
+  geom_line(aes(y=ESNatPred, colour = as.factor(Mechanismdummy), group = as.factor(Mechanismdummy)), size=1.5) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-2.1, 2), xlim=c(0,2), clip = "off")+
+  scale_color_manual(values=c(BRcolor))+
+    scale_fill_manual(values=c(BRcolor))+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Mechanismdummy), fill = as.factor(Mechanismdummy)), alpha=0.2) +
+  xlab("Invasive Effect Size") +
+  ylab("Impact on native community\n\n ") +
+  guides(color = guide_legend(nrow = 1))+
+  theme(legend.position="none",
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size = 20,color="white"),
+        axis.title.y = element_text(size = 21, color="white"),
+        axis.text.y = element_text(size=19,color="white"),
+         axis.text.x = element_text(size=19),
+        axis.line = element_line(colour = "black"),
+      panel.border = element_blank(),
+      plot.margin = margin(1,10,1,1))+  #defines margin so the graph does not cut off) 
+  annotate("segment", x=0.1, xend=1.9, y=-2.16, yend=-2.16, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=0.2, y=-1.95, label="lower", color="black", fontface = "italic", size=6) +
+  annotate("text", x=1.8, y=-1.95, label="higher", color="black", fontface = "italic", size=6)+
+  annotate("text", x=1, y=-1.95, label="Performance", color="black", fontface = "bold.italic", size=6)  +
+   annotate("text", x=0.63, y=2.1, label="(b) Low biotic resistance", color="black", fontface = "bold", size=6)
+
+```
+
+```{r model1: ESNat~ESInv plot [EMPTY NICHES], include=FALSE}
+## ESNat~ESInv with predictions by mechanism
+
+BioticDataModelBR <- BioticDataModel %>% filter(Mechanismdummy=="Empty niches")
+
+p3<-
+  ESNatPred %>% 
+  filter(Mechanism==2) %>% 
+  ggplot(aes(x=ESInvPred)) +
+  geom_hline(yintercept=0, linetype="dashed",
+             color = "gray", size=1.5) +
+  geom_point(data = BioticDataModelBR, aes(ESInvmean, ESNatmean,
+                                     color = as.factor(Mechanismdummy),
+                                     group = as.factor(Mechanismdummy)),
+                                     shape=16,size=3,alpha=0.8) +
+  geom_line(aes(y=ESNatPred, colour = as.factor(Mechanismdummy), group = as.factor(Mechanismdummy)), size=1.5) +
+  theme_bw()+
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim = c(-2.1, 2), xlim=c(0,2), clip = "off")+
+  scale_color_manual(values=c(ENcolor))+
+    scale_fill_manual(values=c(ENcolor))+
+  geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(Mechanismdummy), fill = as.factor(Mechanismdummy)), alpha=0.2) +
+  xlab("Invasive Effect Size") +
+  # xlab(" ")+
+  ylab(" \n\n ") +
+  guides(color = guide_legend(nrow = 1))+
+  theme(legend.position="none",
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size = 20,color="white"),
+        axis.title.y = element_text(size = 21,color="white"),
+        axis.text.y = element_text(size=19),
+      axis.text.x = element_text(size=19, color = "white"),
+        axis.line = element_line(colour = "black"),
+      panel.border = element_blank(),
+      plot.margin = margin(1,10,1,1))+  #defines margin so the graph does not cut off) 
+  annotate("segment", x=0.1, xend=1.9, y=-2.16, yend=-2.16, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", x=0.2, y=-1.95, label="lower", color="black", fontface = "italic", size=6) +
+  annotate("text", x=1.8, y=-1.95, label="higher", color="black", fontface = "italic", size=6)+
+  annotate("text", x=1, y=-1.95, label="Performance", color="black", fontface = "bold.italic", size=6) +
+  annotate("segment", y=2, yend=-1.9, x=-0.15, xend=-0.15, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=-1.9, x=-0.23, label="higher", color="black", fontface = "italic",angle=90, size=6) +
+  annotate("text", y=1.75, x=-0.23, label="lower", color="black", fontface = "italic", angle=90, size=6)+
+  annotate("text", y=0, x=-0.23, label="Impact", color="black", fontface = "bold.italic", angle=90, size=6)+
+   annotate("text", x=0.44, y=2.1, label="(c) Empty niches", color="black", fontface = "bold", size=6) +
+  annotate("text", y=0, x=-.36, label="Effect Size (mean+95%PI)", color="black", angle=90,size=6) +
+  annotate("text", y=0, x=-.48, label="Impact on native community", color="black", angle=90,size=8)
+```
+
 
 # **Q3: Is the native community more impacted by one of multiple invaders?**
 ### organizing model data
 ```{r}
 #observations per mechanism
-BioticDataModel <- BioticDataModel %>% mutate(MultipleInvader=ifelse(MultipleInvader==0, 2, 1))
+BioticDataModelMP <- BioticDataModel %>% mutate(MultipleInvader=ifelse(MultipleInvader==0, 2, 1))
 
-obs <- BioticDataModel %>% count(MultipleInvader)
+obs <- BioticDataModelMP %>% count(MultipleInvader)
 
-J <- nrow(BioticDataModel)
-StudyID <- BioticDataModel$StudyID
-Category <- BioticDataModel$MultipleInvader
-invESavemean <- BioticDataModel$ESInvmean
-invESavesd <- BioticDataModel$ESInvSD
-natESavemean <- BioticDataModel$ESNatmean
-natESavesd <- BioticDataModel$ESNatSD
-W <- length(unique(BioticDataModel$StudyID))
-M <- max(BioticDataModel$ESInvSD, na.rm = T)
-N <- max(BioticDataModel$ESNatSD, na.rm = T)
+J <- nrow(BioticDataModelMP)
+StudyID <- BioticDataModelMP$StudyID
+Category <- BioticDataModelMP$MultipleInvader
+invESavemean <- BioticDataModelMP$ESInvmean
+invESavesd <- BioticDataModelMP$ESInvSD
+natESavemean <- BioticDataModelMP$ESNatmean
+natESavesd <- BioticDataModelMP$ESNatSD
+W <- length(unique(BioticDataModelMP$StudyID))
+M <- max(BioticDataModelMP$ESInvSD, na.rm = T)
+N <- max(BioticDataModelMP$ESNatSD, na.rm = T)
 invpred<-seq(0,2,0.1)
-K <- length(unique(BioticDataModel$MultipleInvader))
+K <- length(unique(BioticDataModelMP$MultipleInvader))
 R <- K+1
 U <- as.numeric(obs[1,2]) #multiple invader
 V <- as.numeric(obs[2,2]) #single invader
@@ -1392,7 +1480,7 @@ text(x = -1.7, y = 0, labels = mylabel)
 
 ```{r include=FALSE}
 # organizing data for forest plot (slopes, inset)
-samplesize <- BioticDataModel %>% group_by(MultipleInvader) %>% add_tally() %>% ungroup() %>% select(MultipleInvader, n) %>% distinct() %>%
+samplesize <- BioticDataModelMP %>% group_by(MultipleInvader) %>% add_tally() %>% ungroup() %>% select(MultipleInvader, n) %>% distinct() %>%
   arrange(MultipleInvader) %>% mutate(comparison2 = paste0("multipleinvader", 1:0), 
          n = paste0('(', ifelse(is.na(n), sum(n, na.rm=TRUE), n), ')')) 
 
@@ -1414,36 +1502,39 @@ forest <- forest %>%
 # forest plot (slopes, inset)
 
 xname <- "Slope (mean+95%CI)"
-inset_plot <-
+inset_plot2 <-
   ggplot(data=forest, aes(y=index, x=mean, xmin=`2.5%`, xmax=`97.5%`))+ 
   geom_errorbarh(data=forest, height=.1, size=1,color=c(Multicolor,Singlecolor)) +
-  geom_point(data = forest, size=4, shape=c(24,21), stroke=1,color=c(Multicolor,Singlecolor),fill=c("white",Singlecolor))+
+  geom_point(data = forest, size=6, shape=c(24,21), stroke=1,color=c(Multicolor,Singlecolor),fill=c("white",Singlecolor))+
     scale_x_continuous(limits=c(-0.6,.5), name=xname) +
-scale_y_continuous(name = "", breaks=1:nrow(forest),trans="reverse", labels = c("Single invader", "Multiple Invader")) +
+scale_y_continuous(name = "\n\n", breaks=1:nrow(forest),trans="reverse", labels = c("Single invader", "Multiple Invader")) +
 geom_vline(xintercept=0, linetype="dashed", alpha=.5, size=1)+
 theme_bw()+
 theme(panel.spacing = unit(1, "lines"),
       panel.grid = element_blank(),
       legend.position = "none",
-      axis.title = element_text(size = 13, color="black"),
-      axis.text.x=element_text(size = 13),
+      plot.margin = margin(1,10,1,15),
+      axis.title = element_text(size = 22, color="black"),
+      axis.text.x=element_text(size = 20),
       panel.background = element_rect(fill='transparent', color=NA),
       plot.background = element_rect(fill='transparent', color=NA),
       axis.text.y=element_blank(),  #remove y axis labels
       axis.ticks.y=element_blank(),
-      axis.title.y=element_blank())+ 
-  annotate("text", x=-0.4, y=1.2, label="(77)", color=Singlecolor, size=5)+
-   annotate("text", x=0.2, y=1.75, label="(26)", color=Multicolor, size=5)
+      panel.border = element_blank(),
+      axis.line = element_line(colour = "black"),
+      axis.title.y=element_text(color="white"))+
+  geom_text_repel(aes(label = n),direction="both",color=c(Multicolor,Singlecolor),size=6, point.size=12,segment.colour = NA)+
+   annotate("text", x=-0.6, y=0.85, label="(f)", color="black", fontface = "bold", size=6)
 ``` 
 
 ```{r include=FALSE}
 # data prep for ESNat~ESInv with predictions by number of invaders + inset
 ## Real data (calculated values)
-BioticDataModel<- BioticDataModel %>% 
+BioticDataModelMP<- BioticDataModelMP %>% 
    mutate(MultInvdummy = ifelse(MultipleInvader==1, "Multiple invaders", "Single invader"))
 
-range(BioticDataModel$ESInvmean)
-range(BioticDataModel$ESNatmean)
+range(BioticDataModelMP$ESInvmean)
+range(BioticDataModelMP$ESNatmean)
 
 ## predictions
 ESNatPred<-as.data.frame(es.simBiotic2[["summary"]])
@@ -1462,11 +1553,11 @@ ESNatPred <- ESNatPred %>%
 ```{r echo=FALSE}
 # ESNat~ESInv with predictions by number of invaders + inset
 
-main_plot <-
+p4 <-
   ggplot(ESNatPred, aes(ESInvPred)) +
   geom_hline(yintercept=0, linetype="dashed",
              color = "gray", size=1.5) +
-  geom_point(data = BioticDataModel, aes(invESavemean, natESavemean,
+  geom_point(data = BioticDataModelMP, aes(invESavemean, natESavemean,
                                      color = as.factor(MultInvdummy),
                                      group = as.factor(MultInvdummy),
                                      shape = as.factor(MultInvdummy)),size=3,alpha=0.8) +
@@ -1479,8 +1570,7 @@ main_plot <-
   geom_ribbon(aes(ymin=CI25, ymax=CI975, group = as.factor(MultInvdummy), fill = as.factor(MultInvdummy)), alpha=0.2) +
   xlab("Invasive Effect Size") +
   ylab("\n\n") +
-  guides(color = guide_legend(nrow = 1))+
-  theme(legend.position=c(0.5,-0.17),
+  theme(legend.position=c(0.8,0.9),
         legend.margin=margin(t=-10),
         legend.title = element_blank(),
         panel.grid = element_blank(),
@@ -1492,18 +1582,23 @@ main_plot <-
         axis.text.x = element_text(size=19),
         axis.line = element_line(colour = "black"),
         panel.border = element_blank(),
-        plot.margin = margin(1,10,18,1))+  #defines margin so the graph does not cut off) 
+        plot.margin = margin(1,10,1,1))+  #defines margin so the graph does not cut off) 
   annotate("segment", x=0.1, xend=1.9, y=-2.16, yend=-2.16, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
   annotate("text", x=0.2, y=-2, label="lower", color="black", fontface = "italic", size=6) +
   annotate("text", x=1.8, y=-2, label="higher", color="black", fontface = "italic", size=6)+
   annotate("text", x=1, y=-2, label="Performance", color="black", fontface = "bold.italic", size=6) +
-   annotate("text", x=0.08, y=2.15, label="(b)", color="black", fontface = "bold", size=6)#+
+   annotate("text", x=0.09, y=2.13, label="(e)", color="black", fontface = "bold", size=6)+
+  annotate("segment", y=2, yend=-1.9, x=-0.15, xend=-0.15, color="black", size=1.3, arrow=arrow(length = unit(0.03, "npc"), ends = 'last', type = "open")) +
+  annotate("text", y=-1.9, x=-0.23, label="higher", color="black", fontface = "italic",angle=90, size=6) +
+  annotate("text", y=1.75, x=-0.23, label="lower", color="black", fontface = "italic", angle=90, size=6)+
+  annotate("text", y=0, x=-0.23, label="Impact", color="black", fontface = "bold.italic", angle=90, size=6)
+```
 
-# adding the inset graph
-main_plot +
-patchwork::inset_element(inset_plot,0.74, 0.66,0.98, 0.999, align_to = 'plot') # overlaps graph to create inset
-
-ggsave(file.path(graph.wd,"ESNatInv_MultInvPredictions.png"), plot = last_plot(), width=7, height=6, dpi = 300, units="in")
+```{r}
+#saves
+png(file.path(graph.wd,"ESNatInv_Predictions.png.png"),width=12, height=13.5, res=300,units="in")
+grid.arrange(p1,p2,p3,inset_plot,p4,inset_plot2,nrow=3, ncol=2)
+dev.off()
 ```
 
 # **SM: Model residuals per covariates**
