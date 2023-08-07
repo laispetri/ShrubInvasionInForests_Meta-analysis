@@ -1319,7 +1319,7 @@ p3<-
   guides(color = guide_legend(nrow = 1))+
   theme(legend.position="none",
         panel.grid = element_blank(),
-        axis.title.x = element_text(size = 20),
+        axis.title.x = element_text(size = 20,color="white"),
         axis.title.y = element_text(size = 21,color="white"),
         axis.text.y = element_text(size=19),
       axis.text.x = element_text(size=19, color = "white"),
