@@ -1,7 +1,7 @@
 # ShrubInvasionInForests_Meta-analysis
 ---
 
-The files in DRYAD allow readers to run models to reproduce results and figures of the paper "Assessing the mechanisms and impacts of shrub invasion in forests: a meta-analysis", currently submitted to Journal of Applied Ecology. 
+The files in DRYAD allow readers to run models to reproduce results and figures of the paper "Assessing the mechanisms and impacts of shrub invasion in forests: a meta-analysis", published in Journal of Applied Ecology (https://doi.org/10.1111/1365-2664.14496). 
 
 The code for to reproduce results and figures can be found at https://github.com/laispetri/ShrubInvasionInForests_Meta-analysis.
 
